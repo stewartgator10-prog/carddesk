@@ -6,7 +6,7 @@
 - `supabase/migrations/20261122300000_ebay_orders_pnl.sql`: `ebay_orders`, `ebay_order_lines` (with match + P&L columns), `ebay_transactions`; adds `inventory.ebay_order_line_id` and `ebay_accounts.orders_synced_at`. Runs after the core tables and `ebay_accounts` migrations.
 - `netlify/functions/ebay-sync-orders.js` (`POST /api/ebay-sync-orders`): first sync looks back 90 days (or `{days}` up to 730), later syncs start 72h before the last one so late fees and refunds are picked up.
 - `netlify/functions/ebay-order-match.js` (`POST /api/ebay-order-match`): confirm / ignore / unlink a sale's inventory match.
-- `netlify/lib/pnl.js`: pure P&L and matching logic, tested in `test/`.
+- `netlify/lib/pnl.js`: pure P&L and matching logic, tested in `tests/`.
 
 ## How profit is figured, per sale line
 `net payout = item + shipping charged − eBay fees − shipping label − promoted listing fees − refunds ± other adjustments`, then `profit = net payout − inventory cost basis`. Sales tax is left out because eBay collects and remits it.

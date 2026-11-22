@@ -95,6 +95,7 @@ export default async (req) => {
     return json({ from: fromIso, to: toIso, orders: orders.length, lines: lines.length, transactions: txns.length, ...result });
   } catch (err) {
     console.error('ebay-sync-orders', err);
+    if (err.code === 'EBAY_NOT_CONNECTED' || err.code === 'EBAY_RECONNECT') return json({ error: err.message, code: err.code }, 409);
     const status = err.status === 401 || err.status === 403 ? 401 : 500;
     return json({ error: err.message, detail: err.detail?.slice?.(0, 500) }, status);
   }
