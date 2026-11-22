@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, DollarSign } from 'lucide-react';
+import EbaySalesTab from './EbaySalesTab.jsx';
 
 const STORAGE_KEYS = {
   watchlist: 'cdp:watchlist',
@@ -425,6 +426,7 @@ export default function CardDeskPro() {
         <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
         <button className={`tab-btn ${tab === 'comps' ? 'active' : ''}`} onClick={() => setTab('comps')}><BarChart3 size={16} /> Sold Comps</button>
         <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}><Package size={16} /> Inventory · P&L</button>
+        <button className={`tab-btn ${tab === 'ebaysales' ? 'active' : ''}`} onClick={() => setTab('ebaysales')}><DollarSign size={16} /> eBay Sales · Real P&L</button>
       </nav>
 
       <main style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
@@ -745,6 +747,7 @@ export default function CardDeskPro() {
             </div>
           </div>
         )}
+        {tab === 'ebaysales' && <EbaySalesTab />}
       </main>
 
       {sellingId && (
