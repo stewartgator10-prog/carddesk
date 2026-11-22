@@ -43,13 +43,14 @@ export default function EbaySalesTab() {
     const [l, tx, inv, acct] = await Promise.all([
       q, t,
       supabase.from('inventory').select('id, card_name, set_name, condition, cost_basis, status').eq('status', 'In Stock').order('card_name'),
-      supabase.from('ebay_accounts').select('orders_synced_at').maybeSingle(),
+      // ebay_accounts holds tokens and is server-only (no RLS policy), so use the newest synced order instead.
+      supabase.from('ebay_orders').select('updated_at').order('updated_at', { ascending: false }).limit(1).maybeSingle(),
     ]);
     if (l.error) setMsg({ type: 'error', text: l.error.message });
     setLines(l.data || []);
     setOverheadTxns((tx.data || []).map((x) => ({ ...x, amount: N(x.amount) })));
     setInventory(inv.data || []);
-    setLastSync(acct.data?.orders_synced_at || null);
+    setLastSync(acct.data?.updated_at || null);
     setLoading(false);
   }
   useEffect(() => { load(); }, [since]);
