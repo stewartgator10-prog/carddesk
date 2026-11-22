@@ -13,19 +13,21 @@ const ago = (iso) => {
   return new Date(iso).toLocaleDateString();
 };
 
-async function api(method) {
+async function api(method, body) {
   if (!supabase) throw new Error('Supabase is not configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).');
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
   if (!token) { const e = new Error('Sign in to CardDesk first.'); e.code = 'NO_SESSION'; throw e; }
-  const path = method === 'CONNECT' ? '/api/ebay-connect' : '/api/ebay-listings';
+  const path = method === 'CONNECT' ? '/api/ebay-connect'
+    : method === 'FINISH' ? '/api/ebay-connect-finish' : '/api/ebay-listings';
   const res = await fetch(path, {
-    method: method === 'CONNECT' ? 'POST' : method,
-    headers: { Authorization: `Bearer ${token}` },
+    method: method === 'CONNECT' || method === 'FINISH' ? 'POST' : method,
+    headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) { const e = new Error(body.error || `Request failed (${res.status})`); e.code = body.code; throw e; }
-  return body;
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) { const e = new Error(out.error || `Request failed (${res.status})`); e.code = out.code; throw e; }
+  return out;
 }
 
 export default function ListingsTab() {
@@ -37,6 +39,7 @@ export default function ListingsTab() {
   const [notice, setNotice] = useState(null);
   const [q, setQ] = useState('');
   const [showEnded, setShowEnded] = useState(false);
+  const [pasteUrl, setPasteUrl] = useState('');
 
   const apply = (d) => { setAccount(d.account); setListings(d.listings || []); };
 
@@ -74,6 +77,18 @@ export default function ListingsTab() {
     setBusy('connect'); setError(null);
     try { const { url } = await api('CONNECT'); window.location.href = url; }
     catch (e) { setError(e.message); setBusy(null); }
+  }
+
+  async function finishFromPaste() {
+    setBusy('finish'); setError(null);
+    try {
+      await api('FINISH', { url: pasteUrl });
+      setPasteUrl('');
+      apply(await api('GET'));
+      setNotice('eBay connected. Pulling your listings…');
+      await sync();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(null); }
   }
 
   async function disconnect() {
@@ -118,6 +133,18 @@ export default function ListingsTab() {
           <button className="btn-primary" onClick={connect} disabled={!!busy} style={{ padding: '12px 24px', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             {busy === 'connect' ? <Loader size={16} className="spin" /> : <Link2 size={16} />} Connect eBay
           </button>
+          <div style={{ maxWidth: 560, margin: '28px auto 0', textAlign: 'left', borderTop: '1px solid #2a2a36', paddingTop: 20 }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>Stuck on eBay's "Thank You" page?</div>
+            <p className="ink-dim" style={{ fontSize: '0.8rem', marginTop: 0 }}>
+              If eBay says "Authorization successfully completed" and doesn't bring you back, copy that page's full address from the browser bar and paste it here within 5 minutes.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="bg-input" placeholder="https://auth2.ebay.com/oauth2/ThirdPartyAuthSucessFailure?..." value={pasteUrl} onChange={(e) => setPasteUrl(e.target.value)} style={{ flex: 1 }} />
+              <button className="btn-ghost" onClick={finishFromPaste} disabled={!!busy || !pasteUrl.trim()} style={{ padding: '8px 14px', whiteSpace: 'nowrap' }}>
+                {busy === 'finish' ? <Loader size={14} className="spin" /> : 'Finish connecting'}
+              </button>
+            </div>
+          </div>
         </section>
       ) : (
         <>
