@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store } from 'lucide-react';
+import ListingsTab from './ListingsTab.jsx';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, markLegacyLocalDataHandled } from './lib/store.js';
 
@@ -62,7 +63,7 @@ function mapCondition(s) {
 
 export default function CardDeskPro({ session }) {
   const userId = session.user.id;
-  const [tab, setTab] = useState('analyzer');
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'analyzer');
   const [dataError, setDataError] = useState(null);
   const { settings, setSettings, loaded: settingsLoaded } = useSettings(userId, DEFAULT_SETTINGS, setDataError);
   const { items: watchlist, setItems: setWatchlist, loaded: watchLoaded, reload: reloadWatchlist } = useCollection('watchlist', userId, setDataError);
@@ -451,6 +452,7 @@ export default function CardDeskPro({ session }) {
         <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
         <button className={`tab-btn ${tab === 'comps' ? 'active' : ''}`} onClick={() => setTab('comps')}><BarChart3 size={16} /> Sold Comps</button>
         <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}><Package size={16} /> Inventory · P&L</button>
+        <button className={`tab-btn ${tab === 'listings' ? 'active' : ''}`} onClick={() => setTab('listings')}><Store size={16} /> eBay Listings</button>
       </nav>
 
       <main style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
@@ -726,6 +728,9 @@ export default function CardDeskPro({ session }) {
             </section>
           </div>
         )}
+
+        {/* ============ EBAY LISTINGS ============ */}
+        {tab === 'listings' && <ListingsTab />}
 
         {/* ============ INVENTORY ============ */}
         {tab === 'inventory' && (
