@@ -91,6 +91,9 @@ export function compStats(matched) {
 // Cost basis for a listing: first in-stock inventory item whose card name matches.
 export function costForListing(listing, inventory) {
   if (listing.costBasis != null && listing.costBasis !== '') return parseFloat(listing.costBasis);
+  // Prefer an inventory item explicitly tied to this eBay listing, then fall back to name matching.
+  const byId = inventory.find(i => i.ebayItemId && String(i.ebayItemId) === String(listing.itemId));
+  if (byId && byId.costBasis !== '' && byId.costBasis != null) return parseFloat(byId.costBasis) || null;
   const text = listing.compKey || listing.title;
   const hit = inventory.find(i => i.status !== 'Sold' && nameMatches(text, i.cardName, i.set));
   return hit ? parseFloat(hit.costBasis) || null : null;

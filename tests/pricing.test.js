@@ -126,3 +126,11 @@ test('server validation', () => {
   assert.match(validateChanges([{ itemId: '1', newPrice: 0.5 }]), /between/);
   assert.match(validateChanges([{ itemId: '1', newPrice: 5 }, { itemId: '1', newPrice: 6 }]), /Duplicate/);
 });
+
+test('cost prefers inventory linked by eBay item id', () => {
+  const inv = [
+    { cardName: 'Charizard VMAX', costBasis: '22', status: 'In Stock' },
+    { cardName: 'Something else', costBasis: '30', status: 'In Stock', ebayItemId: '555' },
+  ];
+  assert.equal(costForListing({ itemId: '555', title: 'Charizard VMAX' }, inv), 30);
+});

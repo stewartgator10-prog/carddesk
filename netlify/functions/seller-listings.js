@@ -1,6 +1,6 @@
 // netlify/functions/seller-listings.js
 // GET /api/seller-listings -> the signed-in seller's active eBay listings for the Repricer.
-// Runs in demo mode (sample listings) until seller sign-in is wired in netlify/lib/seller-adapter.js.
+// Returns sample listings (demo mode) when the user hasn't connected their eBay account yet.
 import { getSellerContext, listActiveListings } from '../lib/seller-adapter.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -10,6 +10,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 export default async (req) => {
   try {
     const ctx = await getSellerContext(req);
+    if (ctx.response) return ctx.response;
     const listings = await listActiveListings(ctx);
     return json({ connected: ctx.connected, demo: !ctx.connected, reason: ctx.reason || null, listings });
   } catch (err) {

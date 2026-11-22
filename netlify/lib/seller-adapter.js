@@ -1,25 +1,29 @@
 // Seller sign-in adapter for the Repricer.
-//
-// STUB: eBay seller sign-in is being built separately (netlify/lib/ebay-seller.js, which exports
-// getSupabaseAdmin, requireUser and getSellerAccessToken, and syncs listings into
-// public.ebay_listings). Until that lands, this adapter reports "not connected" and the
-// Repricer runs in demo mode against sample listings. Nothing is sent to eBay in demo mode.
-//
-// To wire it up once ebay-seller.js is merged, replace the body of getSellerContext with:
-//
-//   import { getSupabaseAdmin, requireUser, getSellerAccessToken } from './ebay-seller.js';
-//   const auth = await requireUser(req);
-//   if (auth instanceof Response) return { connected: false, reason: 'signed_out' };
-//   const admin = getSupabaseAdmin();
-//   const token = await getSellerAccessToken(admin, auth.user.id).catch(() => null);
-//   if (!token) return { connected: false, reason: 'ebay_not_linked' };
-//   return { connected: true, userId: auth.user.id, token, admin };
-//
-// and listActiveListings / recordPriceChanges will use the Supabase tables below.
+// Uses the CardDesk login (Supabase) to identify the user and their linked eBay account.
+// If the user hasn't connected eBay yet, the Repricer falls back to demo mode with sample
+// listings, and nothing is sent to eBay.
+import { requireUser } from './auth.js';
+import { getSupabaseAdmin, getAccount, getSellerAccessToken } from './ebay-seller.js';
 
-// eslint-disable-next-line no-unused-vars
-export async function getSellerContext(req) {
-  return { connected: false, reason: 'seller_signin_not_built' };
+// Returns { response } when the request must be rejected (not signed in), otherwise a context:
+// { connected: false, reason } or { connected: true, userId, admin, token? }.
+// The eBay token is only fetched (and refreshed) when withToken is set, i.e. for price pushes.
+export async function getSellerContext(req, { withToken = false } = {}) {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return { response: auth };
+  const userId = auth.user.id;
+  const admin = getSupabaseAdmin();
+  const account = await getAccount(admin, userId);
+  if (!account) return { connected: false, reason: 'ebay_not_connected' };
+  if (!withToken) return { connected: true, userId, admin };
+  try {
+    const token = await getSellerAccessToken(admin, userId);
+    return { connected: true, userId, admin, token };
+  } catch (err) {
+    if (err.code === 'EBAY_NOT_CONNECTED') return { connected: false, reason: 'ebay_not_connected' };
+    if (err.code === 'EBAY_RECONNECT') return { connected: false, reason: 'ebay_reconnect', error: err.message };
+    throw err;
+  }
 }
 
 export async function listActiveListings(ctx) {

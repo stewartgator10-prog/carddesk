@@ -1,4 +1,5 @@
 // netlify/functions/parse-listing.js
+import { requireUser } from '../lib/auth.js';
 // Parses eBay or TCGplayer listing URLs and returns structured data.
 // For eBay: uses the Browse API getItem endpoint (clean, reliable).
 // For TCGplayer: lightweight HTML fetch + regex extraction (best-effort).
@@ -11,7 +12,7 @@ async function getEbayToken() {
   if (cachedToken && now < tokenExpiresAt - 60_000) return cachedToken;
 
   const appId = process.env.EBAY_APP_ID;
-  const certId = process.env.EBAY_CERT_ID;
+  const certId = process.env.EBAY_CERT_ID || process.env.ebay_Cert_ID; // site stores it as ebay_Cert_ID
   if (!appId || !certId) throw new Error('Missing eBay credentials');
 
   const credentials = Buffer.from(`${appId}:${certId}`).toString('base64');
@@ -138,16 +139,12 @@ async function parseTcgplayerUrl(url) {
 }
 
 export default async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
+  if (req.method !== 'GET') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
   }
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const url = new URL(req.url);
@@ -160,10 +157,19 @@ export default async (req) => {
       });
     }
 
+    // Match on the real hostname, not a substring, so the server only ever
+    // fetches eBay or TCGplayer pages.
+    let host = '';
+    try {
+      const parsed = new URL(listingUrl);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') host = parsed.hostname.toLowerCase();
+    } catch { /* not a URL */ }
+    const isHost = (domain) => host === domain || host.endsWith('.' + domain);
+
     let result;
-    if (listingUrl.includes('ebay.com')) {
+    if (isHost('ebay.com')) {
       result = await parseEbayUrl(listingUrl);
-    } else if (listingUrl.includes('tcgplayer.com')) {
+    } else if (isHost('tcgplayer.com')) {
       result = await parseTcgplayerUrl(listingUrl);
     } else {
       result = { error: 'URL must be from eBay or TCGplayer.' };
@@ -173,13 +179,12 @@ export default async (req) => {
       status: result.error ? 400 : 200,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
       },
     });
   } catch (err) {
     return new Response(JSON.stringify({ error: 'Server error', detail: err.message }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 };

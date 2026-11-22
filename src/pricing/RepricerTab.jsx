@@ -25,7 +25,7 @@ function useStored(key, initial) {
 
 const daysSince = d => (d ? Math.max(0, Math.round((Date.now() - new Date(d)) / 86400000)) : null);
 
-export default function RepricerTab({ comps, inventory, settings, onGoToComps }) {
+export default function RepricerTab({ comps, inventory, settings, onGoToComps, onGoToListings }) {
   const [state, setState] = useState({ loading: true, error: null, demo: false, listings: [] });
   const [links, setLinks] = useStored(LINKS_KEY, {});
   const [history, setHistory] = useStored(HISTORY_KEY, []);
@@ -147,7 +147,8 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps })
           <AlertTriangle size={16} className="accent-amber" style={{ flexShrink: 0, marginTop: 2 }} />
           <div>
             <strong className="accent-amber">DEMO MODE.</strong> Your eBay seller account isn't connected yet, so these are sample listings and
-            nothing is sent to eBay. Once seller sign-in is live, your real active listings load here and pushes go straight to eBay.
+            nothing is sent to eBay. Connect eBay on the <button className="btn-icon" style={{ padding: 0, textDecoration: 'underline', color: 'inherit', fontSize: 'inherit', fontFamily: 'inherit' }} onClick={onGoToListings}>eBay Listings</button> tab
+            and sync, then your real active listings load here and pushes go straight to eBay.
           </div>
         </div>
       )}

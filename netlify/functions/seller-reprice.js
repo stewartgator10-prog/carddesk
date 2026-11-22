@@ -1,7 +1,8 @@
 // netlify/functions/seller-reprice.js
 // POST /api/seller-reprice { changes: [{ itemId, sku?, oldPrice, newPrice, reason? }] }
 // Revises prices on eBay via Trading API ReviseInventoryStatus (4 items per call).
-// In demo mode (no seller sign-in yet) it validates and pretends, and never contacts eBay.
+// In demo mode (eBay account not connected) it validates and pretends, and never contacts eBay.
+// A user whose eBay sign-in expired gets an error, never a fake success.
 import { getSellerContext, recordPriceChanges } from '../lib/seller-adapter.js';
 import { revisePrices } from '../lib/trading-price.js';
 
@@ -34,7 +35,9 @@ export default async (req) => {
   if (problem) return json({ error: problem }, 400);
 
   try {
-    const ctx = await getSellerContext(req);
+    const ctx = await getSellerContext(req, { withToken: true });
+    if (ctx.response) return ctx.response;
+    if (ctx.reason === 'ebay_reconnect') return json({ error: ctx.error || 'Reconnect your eBay account.' }, 409);
     if (!ctx.connected) {
       const results = changes.map(c => ({ itemId: c.itemId, ok: true, price: c.newPrice, error: null, warnings: [] }));
       return json({ demo: true, results });
