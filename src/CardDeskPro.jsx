@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, Store } from 'lucide-react';
+import ListingsTab from './ListingsTab.jsx';
 
 const STORAGE_KEYS = {
   watchlist: 'cdp:watchlist',
@@ -80,7 +81,7 @@ function mapCondition(s) {
 }
 
 export default function CardDeskPro() {
-  const [tab, setTab] = useState('analyzer');
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'analyzer');
   const [settings, setSettings] = useLocalStorage(STORAGE_KEYS.settings, DEFAULT_SETTINGS);
   const [watchlist, setWatchlist] = useLocalStorage(STORAGE_KEYS.watchlist, []);
   const [comps, setComps] = useLocalStorage(STORAGE_KEYS.comps, []);
@@ -425,6 +426,7 @@ export default function CardDeskPro() {
         <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
         <button className={`tab-btn ${tab === 'comps' ? 'active' : ''}`} onClick={() => setTab('comps')}><BarChart3 size={16} /> Sold Comps</button>
         <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}><Package size={16} /> Inventory · P&L</button>
+        <button className={`tab-btn ${tab === 'listings' ? 'active' : ''}`} onClick={() => setTab('listings')}><Store size={16} /> eBay Listings</button>
       </nav>
 
       <main style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
@@ -700,6 +702,9 @@ export default function CardDeskPro() {
             </section>
           </div>
         )}
+
+        {/* ============ EBAY LISTINGS ============ */}
+        {tab === 'listings' && <ListingsTab />}
 
         {/* ============ INVENTORY ============ */}
         {tab === 'inventory' && (
