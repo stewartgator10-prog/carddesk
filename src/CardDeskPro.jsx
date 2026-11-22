@@ -1,12 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap } from 'lucide-react';
-
-const STORAGE_KEYS = {
-  watchlist: 'cdp:watchlist',
-  comps: 'cdp:comps',
-  inventory: 'cdp:inventory',
-  settings: 'cdp:settings',
-};
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut } from 'lucide-react';
+import { supabase, apiFetch } from './lib/supabase.js';
+import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, markLegacyLocalDataHandled } from './lib/store.js';
 
 const DEFAULT_SETTINGS = {
   ebayFeePct: 13.25,
@@ -48,20 +43,6 @@ function computeMedian(arr) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function useLocalStorage(key, initial) {
-  const [value, setValue] = useState(() => {
-    try {
-      const stored = localStorage.getItem(key);
-      return stored ? JSON.parse(stored) : initial;
-    } catch { return initial; }
-  });
-  const persist = (next) => {
-    setValue(next);
-    try { localStorage.setItem(key, JSON.stringify(next)); } catch (e) { console.error(e); }
-  };
-  return [value, persist];
-}
-
 // Map an eBay condition string to our internal condition codes
 function mapCondition(s) {
   if (!s) return 'NM';
@@ -79,12 +60,17 @@ function mapCondition(s) {
   return 'NM';
 }
 
-export default function CardDeskPro() {
+export default function CardDeskPro({ session }) {
+  const userId = session.user.id;
   const [tab, setTab] = useState('analyzer');
-  const [settings, setSettings] = useLocalStorage(STORAGE_KEYS.settings, DEFAULT_SETTINGS);
-  const [watchlist, setWatchlist] = useLocalStorage(STORAGE_KEYS.watchlist, []);
-  const [comps, setComps] = useLocalStorage(STORAGE_KEYS.comps, []);
-  const [inventory, setInventory] = useLocalStorage(STORAGE_KEYS.inventory, []);
+  const [dataError, setDataError] = useState(null);
+  const { settings, setSettings, loaded: settingsLoaded } = useSettings(userId, DEFAULT_SETTINGS, setDataError);
+  const { items: watchlist, setItems: setWatchlist, loaded: watchLoaded, reload: reloadWatchlist } = useCollection('watchlist', userId, setDataError);
+  const { items: comps, setItems: setComps, loaded: compsLoaded, reload: reloadComps } = useCollection('comps', userId, setDataError);
+  const { items: inventory, setItems: setInventory, loaded: invLoaded, reload: reloadInventory } = useCollection('inventory', userId, setDataError);
+  const dataLoaded = settingsLoaded && watchLoaded && compsLoaded && invLoaded;
+  const [legacyLocal, setLegacyLocal] = useState(() => readLegacyLocalData());
+  const [importMsg, setImportMsg] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
 
   const [aCardName, setACardName] = useState('');
@@ -108,7 +94,7 @@ export default function CardDeskPro() {
     setPasteLoading(true);
     setPasteMsg(null);
     try {
-      const res = await fetch(`/api/parse-listing?url=${encodeURIComponent(pasteUrl)}`);
+      const res = await apiFetch(`/api/parse-listing?url=${encodeURIComponent(pasteUrl)}`);
       const data = await res.json();
       if (data.error) {
         setPasteMsg({ type: 'error', text: data.error });
@@ -177,7 +163,7 @@ export default function CardDeskPro() {
   const saveToWatchlist = () => {
     if (!aCardName || !aFmv) return;
     setWatchlist([{
-      id: Date.now(), cardName: aCardName, game: aGame, set: aSet, condition: aCondition,
+      id: newId(), cardName: aCardName, game: aGame, set: aSet, condition: aCondition,
       targetFmv: aFmv,
       maxBuy: ((parseFloat(aFmv) * (1 - settings.sharpnessThreshold / 100))).toFixed(2),
       liquidity: aLiquidity, added: new Date().toISOString(),
@@ -187,7 +173,7 @@ export default function CardDeskPro() {
   const addToInventory = () => {
     if (!aCardName || !aAskPrice) return;
     setInventory([{
-      id: Date.now(), cardName: aCardName, game: aGame, set: aSet, condition: aCondition,
+      id: newId(), cardName: aCardName, game: aGame, set: aSet, condition: aCondition,
       purchasePrice: aAskPrice, shippingIn: aShippingIn || '0',
       costBasis: ((parseFloat(aAskPrice) || 0) + (parseFloat(aShippingIn) || 0)).toFixed(2),
       currentFmv: aFmv || '', liquidity: aLiquidity, status: 'In Stock',
@@ -210,7 +196,7 @@ export default function CardDeskPro() {
     setSearchError(null);
     setSearchResults(null);
     try {
-      const res = await fetch(`/api/ebay-search?q=${encodeURIComponent(searchQuery)}&sort=${searchSort}&limit=30`);
+      const res = await apiFetch(`/api/ebay-search?q=${encodeURIComponent(searchQuery)}&sort=${searchSort}&limit=30`);
       const data = await res.json();
       if (data.error) {
         setSearchError(data.detail || data.error);
@@ -288,7 +274,7 @@ export default function CardDeskPro() {
 
   const addComp = () => {
     if (!cCardName || !cSalePrice) return;
-    setComps([{ id: Date.now(), cardName: cCardName, game: cGame, set: cSet, condition: cCondition, salePrice: cSalePrice, source: cSource, date: cDate }, ...comps]);
+    setComps([{ id: newId(), cardName: cCardName, game: cGame, set: cSet, condition: cCondition, salePrice: cSalePrice, source: cSource, date: cDate }, ...comps]);
     setCCardName(''); setCSet(''); setCSalePrice('');
   };
 
@@ -335,23 +321,48 @@ export default function CardDeskPro() {
     URL.revokeObjectURL(url);
   };
 
+  async function runImport(data, label) {
+    setImportMsg({ ok: true, text: `Importing ${label}…` });
+    try {
+      const counts = await importBackup(data, userId);
+      await Promise.all([reloadInventory(), reloadWatchlist(), reloadComps()]);
+      if (counts.settings && data.settings) setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
+      const parts = ['inventory', 'watchlist', 'comps']
+        .filter(t => counts[t].found)
+        .map(t => `${counts[t].added} of ${counts[t].found} ${t}`);
+      const skipped = ['inventory', 'watchlist', 'comps'].reduce((n, t) => n + counts[t].found - counts[t].added, 0);
+      setImportMsg({ ok: true, text: `Imported ${parts.join(', ') || 'nothing'}${counts.settings ? ' + settings' : ''}.${skipped ? ` ${skipped} were already in your account and were skipped.` : ''}` });
+      return true;
+    } catch (err) {
+      setImportMsg({ ok: false, text: `Import failed: ${err.message}` });
+      return false;
+    }
+  }
+
   const importData = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (data.watchlist) setWatchlist(data.watchlist);
-        if (data.comps) setComps(data.comps);
-        if (data.inventory) setInventory(data.inventory);
-        if (data.settings) setSettings(data.settings);
-        alert('Backup restored successfully.');
-      } catch (err) { alert('Invalid backup file: ' + err.message); }
+      let data;
+      try { data = JSON.parse(ev.target.result); }
+      catch (err) { setImportMsg({ ok: false, text: 'Invalid backup file: ' + err.message }); return; }
+      runImport(data, file.name);
     };
     reader.readAsText(file);
     e.target.value = '';
   };
+
+  async function importLegacyLocal() {
+    if (!legacyLocal) return;
+    const ok = await runImport(legacyLocal.data, 'data saved in this browser');
+    if (ok) { markLegacyLocalDataHandled(); setLegacyLocal(null); }
+  }
+  function dismissLegacyLocal() { markLegacyLocalDataHandled(); setLegacyLocal(null); }
+
+  if (!dataLoaded && !dataError) {
+    return <div style={{ minHeight: '100vh', background: '#0a0a0f', color: '#8a8a96', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"JetBrains Mono", Menlo, monospace' }}>Loading your data…</div>;
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #0a0a0f 0%, #12121a 100%)', color: '#e8e8ed', fontFamily: '"JetBrains Mono", "SF Mono", Menlo, monospace' }}>
@@ -412,11 +423,26 @@ export default function CardDeskPro() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn-ghost" onClick={exportData} style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Download size={14} /> Backup</button>
           <label className="btn-ghost" style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-            <Upload size={14} /> Restore<input type="file" accept=".json" onChange={importData} style={{ display: 'none' }} />
+            <Upload size={14} /> Import Backup<input type="file" accept=".json" onChange={importData} style={{ display: 'none' }} />
           </label>
           <button className="btn-ghost" onClick={() => setShowSettings(true)} style={{ padding: '10px 16px' }}>⚙ Settings</button>
+          <button className="btn-ghost" onClick={() => supabase.auth.signOut()} title={`Signed in as ${session.user.email}`} style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><LogOut size={14} /> Sign out</button>
         </div>
       </header>
+
+      {legacyLocal && (
+        <div style={{ padding: '12px 32px', background: 'rgba(251, 191, 36, 0.08)', borderBottom: '1px solid #fbbf24', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem' }}>
+          <span className="accent-amber">This browser still has {legacyLocal.total} items from the old CardDesk (before accounts). Copy them into your account?</span>
+          <button className="btn-primary" onClick={importLegacyLocal} style={{ padding: '6px 14px' }}>Import them</button>
+          <button className="btn-ghost" onClick={dismissLegacyLocal} style={{ padding: '6px 12px', fontSize: '0.75rem' }}>Not now, don't ask again</button>
+        </div>
+      )}
+      {(importMsg || dataError) && (
+        <div style={{ padding: '10px 32px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: '0.8rem' }}>
+          <span className={dataError || (importMsg && !importMsg.ok) ? 'accent-red' : 'accent-green'}>{dataError || importMsg.text}</span>
+          <button className="btn-icon" onClick={() => { setImportMsg(null); setDataError(null); }}><X size={14} /></button>
+        </div>
+      )}
 
       <nav style={{ borderBottom: '1px solid #2a2a36', padding: '0 32px', display: 'flex', gap: 0, overflowX: 'auto' }}>
         <button className={`tab-btn ${tab === 'analyzer' ? 'active' : ''}`} onClick={() => setTab('analyzer')}><Target size={16} /> Deal Analyzer</button>
