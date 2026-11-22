@@ -1,4 +1,5 @@
 // netlify/functions/ebay-search.js
+import { requireUser } from '../lib/auth.js';
 // Live eBay listing search using the Browse API.
 // Uses Client Credentials OAuth flow. Token is cached in-memory for ~2 hours.
 
@@ -41,16 +42,12 @@ async function getAccessToken() {
 }
 
 export default async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
+  if (req.method !== 'GET') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
   }
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const url = new URL(req.url);
@@ -91,7 +88,7 @@ export default async (req) => {
       const errText = await ebayRes.text();
       return new Response(JSON.stringify({ error: 'eBay API error', detail: errText, status: ebayRes.status }), {
         status: 502,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        headers: { 'Content-Type': 'application/json' },
       });
     }
 
@@ -121,13 +118,12 @@ export default async (req) => {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
       },
     });
   } catch (err) {
     return new Response(JSON.stringify({ error: 'Server error', detail: err.message }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 };
