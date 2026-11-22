@@ -51,15 +51,16 @@ function ruName() {
 }
 
 export function buildAuthorizeUrl(state) {
-  const p = new URLSearchParams({
-    client_id: process.env.EBAY_APP_ID,
-    redirect_uri: ruName(),
-    response_type: 'code',
-    scope: EBAY_SCOPES.join(' '),
-    state,
-    prompt: 'login',
-  });
-  return `${AUTHORIZE_URL}?${p.toString()}`;
+  // Match the format of eBay's own "branded OAuth sign-in" link: spaces in the
+  // scope list encoded as %20 (not +) and no extra prompt parameter.
+  const params = [
+    ['client_id', process.env.EBAY_APP_ID],
+    ['redirect_uri', ruName()],
+    ['response_type', 'code'],
+    ['scope', EBAY_SCOPES.join(' ')],
+    ['state', state],
+  ];
+  return `${AUTHORIZE_URL}?${params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`;
 }
 
 async function tokenRequest(body) {
