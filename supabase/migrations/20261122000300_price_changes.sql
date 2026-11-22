@@ -17,6 +17,7 @@ create index if not exists price_changes_user_item_idx on public.price_changes (
 
 alter table public.price_changes enable row level security;
 
+drop policy if exists "own price changes are readable" on public.price_changes;
 create policy "own price changes are readable"
   on public.price_changes for select
   using (user_id = auth.uid());
