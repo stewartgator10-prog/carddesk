@@ -15,7 +15,7 @@ active listings into Supabase. It is read-only for now.
 
 ## 2. Supabase
 
-Run `supabase/migrations/20261122000100_ebay_seller.sql` in the SQL editor
+Run `supabase/migrations/20261122000200_ebay_seller.sql` in the SQL editor
 (after the core-tables/login migration, since it references `auth.users`).
 
 ## 3. Netlify → Site configuration → Environment variables
