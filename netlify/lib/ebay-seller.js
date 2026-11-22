@@ -246,3 +246,26 @@ export async function syncListings(supabaseAdmin, userId) {
   await supabaseAdmin.from('ebay_accounts').update({ last_synced_at: now, updated_at: now }).eq('id', acct.id);
   return { active: rows.length, ended: ended?.length || 0, synced_at: now };
 }
+
+// Exchanges an authorization code and saves the tokens on this user's
+// ebay_accounts row. Used by the redirect callback and by the "paste the eBay
+// page address" fallback.
+export async function connectWithCode(supabaseAdmin, userId, code) {
+  const t = await exchangeCodeForTokens(code);
+  const identity = await getEbayIdentity(t.access_token);
+  const now = Date.now();
+  const row = {
+    user_id: userId,
+    ...identity,
+    access_token: t.access_token,
+    access_token_expires_at: new Date(now + t.expires_in * 1000).toISOString(),
+    refresh_token: t.refresh_token,
+    refresh_token_expires_at: t.refresh_token_expires_in
+      ? new Date(now + t.refresh_token_expires_in * 1000).toISOString() : null,
+    scopes: EBAY_SCOPES.join(' '),
+    updated_at: new Date(now).toISOString(),
+  };
+  const { error } = await supabaseAdmin.from('ebay_accounts').upsert(row, { onConflict: 'user_id' });
+  if (error) throw error;
+  return identity;
+}
