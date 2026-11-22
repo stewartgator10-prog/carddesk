@@ -28,6 +28,7 @@ export async function listActiveListings(ctx) {
     .from('ebay_listings')
     .select('item_id, sku, title, price, quantity_available, image_url, view_url, listing_type, watch_count, start_time')
     .eq('user_id', ctx.userId)
+    .eq('status', 'Active')
     .order('title');
   if (error) throw new Error(error.message);
   return data.map(r => ({
