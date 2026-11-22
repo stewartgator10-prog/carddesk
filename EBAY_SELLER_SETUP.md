@@ -7,8 +7,8 @@ active listings into Supabase. It is read-only for now.
 
 1. **Application Keys** → copy the Production **App ID (Client ID)** and **Cert ID (Client Secret)**.
 2. **User Tokens** → *Get a Token from eBay via Your Application* → add an eBay Redirect URL (this creates your **RuName**):
-   - Auth accepted URL: `https://<your-netlify-site>/api/ebay-callback`
-   - Auth declined URL: `https://<your-netlify-site>/api/ebay-callback?declined=1`
+   - Auth accepted URL: `https://jaxspic.netlify.app/api/ebay-callback`
+   - Auth declined URL: `https://jaxspic.netlify.app/api/ebay-callback?declined=1`
    - Privacy policy URL: any page on your site
    - OAuth enabled: **yes**
    - Copy the **RuName** value (looks like `Your_Name-YourApp-PRD-abc123-defgh`). This is *not* a URL.

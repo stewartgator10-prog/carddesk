@@ -38,7 +38,9 @@ export function getSupabaseAdmin() {
 }
 
 function basicAuth() {
-  const { EBAY_APP_ID, EBAY_CERT_ID } = process.env;
+  const { EBAY_APP_ID } = process.env;
+  // The Netlify site stores the secret as `ebay_Cert_ID`; accept either spelling.
+  const EBAY_CERT_ID = process.env.EBAY_CERT_ID || process.env.ebay_Cert_ID;
   if (!EBAY_APP_ID || !EBAY_CERT_ID) throw new Error('Missing EBAY_APP_ID or EBAY_CERT_ID.');
   return 'Basic ' + Buffer.from(`${EBAY_APP_ID}:${EBAY_CERT_ID}`).toString('base64');
 }

@@ -12,7 +12,7 @@ async function getAccessToken() {
   }
 
   const appId = process.env.EBAY_APP_ID;
-  const certId = process.env.EBAY_CERT_ID;
+  const certId = process.env.EBAY_CERT_ID || process.env.ebay_Cert_ID; // site stores it as ebay_Cert_ID
 
   if (!appId || !certId) {
     throw new Error('Missing EBAY_APP_ID or EBAY_CERT_ID environment variable.');
