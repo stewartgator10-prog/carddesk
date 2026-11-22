@@ -7,7 +7,7 @@ The two eBay functions (`/api/ebay-search`, `/api/parse-listing`) now refuse cal
 ## One-time setup (about 10 minutes)
 
 1. **Supabase project.** Create a project (or pick one) in the Supabase dashboard.
-2. **Tables.** Open SQL Editor and run `supabase/migrations/20261122000000_core_tables.sql`
+2. **Tables.** (Already applied to the JaxsPics project.) Open SQL Editor and run the files in `supabase/migrations/` in order
    (or `supabase db push` if you use the CLI). It creates `inventory`, `watchlist`, `comps`, `settings`
    with row-level security so each account only sees its own rows.
 3. **Auth settings** (Authentication > URL Configuration): set Site URL to your Netlify URL and add it
