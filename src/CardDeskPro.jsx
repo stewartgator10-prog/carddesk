@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, Tag } from 'lucide-react';
+import RepricerTab from './pricing/RepricerTab.jsx';
 
 const STORAGE_KEYS = {
   watchlist: 'cdp:watchlist',
@@ -425,6 +426,7 @@ export default function CardDeskPro() {
         <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
         <button className={`tab-btn ${tab === 'comps' ? 'active' : ''}`} onClick={() => setTab('comps')}><BarChart3 size={16} /> Sold Comps</button>
         <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}><Package size={16} /> Inventory · P&L</button>
+        <button className={`tab-btn ${tab === 'repricer' ? 'active' : ''}`} onClick={() => setTab('repricer')}><Tag size={16} /> Repricer</button>
       </nav>
 
       <main style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
@@ -699,6 +701,11 @@ export default function CardDeskPro() {
               )}
             </section>
           </div>
+        )}
+
+        {/* ============ REPRICER ============ */}
+        {tab === 'repricer' && (
+          <RepricerTab comps={comps} inventory={inventory} settings={settings} onGoToComps={() => setTab('comps')} />
         )}
 
         {/* ============ INVENTORY ============ */}
