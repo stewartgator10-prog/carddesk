@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign } from 'lucide-react';
+import EbaySalesTab from './EbaySalesTab.jsx';
 import ListingsTab from './ListingsTab.jsx';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, markLegacyLocalDataHandled } from './lib/store.js';
@@ -455,6 +456,7 @@ export default function CardDeskPro({ session }) {
         <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}><Package size={16} /> Inventory · P&L</button>
         <button className={`tab-btn ${tab === 'listings' ? 'active' : ''}`} onClick={() => setTab('listings')}><Store size={16} /> eBay Listings</button>
         <button className={`tab-btn ${tab === 'repricer' ? 'active' : ''}`} onClick={() => setTab('repricer')}><Tag size={16} /> Repricer</button>
+        <button className={`tab-btn ${tab === 'ebaysales' ? 'active' : ''}`} onClick={() => setTab('ebaysales')}><DollarSign size={16} /> eBay Sales · Real P&L</button>
       </nav>
 
       <main style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
@@ -783,6 +785,7 @@ export default function CardDeskPro({ session }) {
             </div>
           </div>
         )}
+        {tab === 'ebaysales' && <EbaySalesTab />}
       </main>
 
       {sellingId && (
