@@ -28,6 +28,7 @@ export default function EbaySalesTab() {
   const [msg, setMsg] = useState(null);
   const [lastSync, setLastSync] = useState(null);
   const [pick, setPick] = useState({}); // line_item_id -> inventory id chosen in the dropdown
+  const [reopened, setReopened] = useState(() => new Set()); // 'Not tracked' sales the user wants to match again
 
   const since = useMemo(() => {
     const r = RANGES.find((x) => x.key === range);
@@ -71,7 +72,7 @@ export default function EbaySalesTab() {
     setSyncing(true); setMsg(null);
     try {
       const r = await call('/api/ebay-sync-orders', days ? { days } : {});
-      setMsg({ type: 'ok', text: `Synced ${r.orders} orders and ${r.transactions} payouts/fees. ${r.autoMarkedSold} card(s) marked sold, ${r.suggested} match(es) to review.` });
+      setMsg({ type: 'ok', text: `Synced ${r.orders} orders and ${r.transactions} payouts/fees. ${r.autoMarkedSold} card(s) marked sold, ${r.suggested} match(es) to review.${r.restocked ? ` ${r.restocked} card(s) back in stock after a cancelled order.` : ''}` });
       await load();
     } catch (e) { setMsg({ type: 'error', text: e.message }); }
     setSyncing(false);
@@ -91,7 +92,8 @@ export default function EbaySalesTab() {
     cancelled: l.ebay_orders?.cancel_state === 'CANCELED',
   })), [lines]);
   const s = useMemo(() => summarizePnl(rows, overheadTxns), [rows, overheadTxns]);
-  const toReview = rows.filter((r) => !r.cancelled && ['suggested', 'unmatched'].includes(r.match_status));
+  const toReview = rows.filter((r) => !r.cancelled && (['suggested', 'unmatched'].includes(r.match_status)
+    || (r.match_status === 'ignored' && reopened.has(r.line_item_id))));
 
   if (!supabase) {
     return <div className="bg-card ink-dim" style={{ padding: 32 }}>Supabase isn't configured yet. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to use eBay sales sync.</div>;
@@ -130,7 +132,7 @@ export default function EbaySalesTab() {
         <Stat label="EBAY FEES" value={fmt(-s.fees)} sub={s.estimated_fees ? `${s.estimated_fees} sale(s) not final yet` : 'all from payouts'} />
         <Stat label="NET PAYOUT" value={fmt(s.net_payout)} sub={`labels ${fmt(s.shipping_label)} · ads ${fmt(s.ad_fees)} · refunds ${fmt(s.refunds)}`} />
         <Stat label="PROFIT" value={fmt(s.profit_after_overhead)} tone={s.profit_after_overhead}
-          sub={`${fmt(s.profit)} on sales, ${fmt(s.overhead)} store costs${s.missing_cost ? ` · ${s.missing_cost} sale(s) missing cost` : ''}`} />
+          sub={`${fmt(s.profit)} on sales, ${fmt(s.overhead)} store costs${s.missing_cost ? ` · ${s.missing_cost} sale(s) missing cost` : ''}${rows.some((r) => r.cost_estimated && r.cost_basis != null) ? ` · ${rows.filter((r) => r.cost_estimated && r.cost_basis != null).length} use estimated cost` : ''}`} />
       </div>
 
       {toReview.length > 0 && (
@@ -179,10 +181,11 @@ export default function EbaySalesTab() {
                   <div style={{ textAlign: 'right' }}>{fmt(r.shipping_label)}</div>
                   <div style={{ textAlign: 'right' }}>{fmt(r.ad_fees + r.refunds + r.other)}</div>
                   <div style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(r.net_payout)}</div>
-                  <div style={{ textAlign: 'right' }}>{fmt(r.cost_basis)}</div>
+                  <div style={{ textAlign: 'right' }}>{fmt(r.cost_basis)}{r.cost_estimated && r.cost_basis != null && <div style={{ fontSize: '0.6rem', color: '#fbbf24' }} title="Estimated cost">est.</div>}</div>
                   <div style={{ textAlign: 'right', fontWeight: 600 }} className={r.profit == null ? 'ink-faint' : r.profit >= 0 ? 'accent-green' : 'accent-red'}>{fmt(r.profit)}</div>
                   <div style={{ fontSize: '0.7rem' }}>
                     <div className="ink-dim">{MATCH_LABEL[r.match_status]}</div>
+                    {r.match_status === 'ignored' && !r.cancelled && !reopened.has(r.line_item_id) && <button className="btn-ghost" onClick={() => setReopened(new Set(reopened).add(r.line_item_id))} title="Pick the card this sale was, so profit uses its cost" style={{ padding: '2px 6px', fontSize: '0.65rem', marginTop: 2 }}>Match</button>}
                     {['auto', 'confirmed'].includes(r.match_status) && <button className="btn-ghost" onClick={() => act(r, 'unlink')} title="Wrong card: undo and put it back in stock" style={{ padding: '2px 6px', fontSize: '0.65rem', marginTop: 2, display: 'inline-flex', gap: 3, alignItems: 'center' }}><Link2 size={10} /> Unlink</button>}
                   </div>
                 </div>

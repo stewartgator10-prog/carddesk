@@ -58,6 +58,7 @@ export const MAPPERS = {
       shippingOut: str(r.shipping_out),
       ebayItemId: r.ebay_item_id || '',
       sku: r.sku || '',
+      costSource: r.cost_source || '', // read-only here: set by the Costs tab on the server
     }),
     order: { column: 'created_at', ascending: false },
   },

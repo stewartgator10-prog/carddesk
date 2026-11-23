@@ -38,9 +38,9 @@ const tags = (xml, name) => [...xml.matchAll(new RegExp(`<${name}[^>]*>([\\s\\S]
 export function parseReviseResponse(xml, changes) {
   const ack = tag(xml, 'Ack') || 'Failure';
   const echoed = new Map(tags(xml, 'InventoryStatus').map(b => [tag(b, 'ItemID'), parseFloat(tag(b, 'StartPrice'))]));
-  const errors = tags(xml, 'Errors')
+  const errors = [...new Set(tags(xml, 'Errors')
     .filter(e => tag(e, 'SeverityCode') === 'Error')
-    .map(e => tag(e, 'LongMessage') || tag(e, 'ShortMessage') || 'Unknown eBay error');
+    .map(e => tag(e, 'LongMessage') || tag(e, 'ShortMessage') || 'Unknown eBay error'))];
   const warnings = tags(xml, 'Errors')
     .filter(e => tag(e, 'SeverityCode') === 'Warning')
     .map(e => tag(e, 'ShortMessage'));
@@ -73,6 +73,69 @@ export async function tradingCall(token, callName, xmlBody) {
   return text;
 }
 
+// ---------- Best Offer thresholds ----------
+// A listing with Best Offer can have an auto-decline (MinimumBestOfferPrice) and an
+// auto-accept (BestOfferAutoAcceptPrice) amount. eBay refuses a new price at or below
+// either one, and ReviseInventoryStatus can't change them. When that happens we read
+// both amounts with GetItem, scale them by the same % as the price change (so the
+// seller's offer policy stays the same), and revise all three with ReviseFixedPriceItem.
+export const BEST_OFFER_ERROR = /auto[\s-]?(decline|accept)|best offer/i;
+
+const money2 = n => Number(n).toFixed(2);
+const floorCents = n => Math.floor(n * 100 + 1e-6) / 100;
+const amount = (xml, name) => { const v = tag(xml, name); const n = v == null ? NaN : parseFloat(v); return Number.isFinite(n) ? n : null; };
+
+export function buildGetItemXml(itemId) {
+  return `<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ErrorLanguage>en_US</ErrorLanguage><ItemID>${esc(itemId)}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>`;
+}
+
+export function parseBestOffer(xml) {
+  return {
+    startPrice: amount(xml, 'StartPrice'),
+    decline: amount(xml, 'MinimumBestOfferPrice'),
+    accept: amount(xml, 'BestOfferAutoAcceptPrice'),
+  };
+}
+
+// Keeps each threshold at the same fraction of the price, rounded down to the cent,
+// always below the new price, and auto-accept above auto-decline.
+export function scaleBestOffer({ oldPrice, newPrice, decline, accept }) {
+  const ratio = oldPrice > 0 ? newPrice / oldPrice : 1;
+  const fit = v => {
+    if (v == null) return null;
+    const s = Math.min(floorCents(v * ratio), floorCents(newPrice - 0.01));
+    return s >= 0.01 ? s : null;
+  };
+  const d = fit(decline);
+  let a = fit(accept);
+  if (a != null && d != null && a <= d) a = null; // can't keep both; dropping auto-accept is the safe side
+  return { decline: d, accept: a };
+}
+
+export function buildReviseFixedPriceXml({ itemId, newPrice, decline, accept }) {
+  const details = [
+    decline != null ? `<MinimumBestOfferPrice currencyID="USD">${money2(decline)}</MinimumBestOfferPrice>` : '',
+    accept != null ? `<BestOfferAutoAcceptPrice currencyID="USD">${money2(accept)}</BestOfferAutoAcceptPrice>` : '',
+  ].join('');
+  return `<?xml version="1.0" encoding="utf-8"?><ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel><Item><ItemID>${esc(itemId)}</ItemID><StartPrice currencyID="USD">${money2(newPrice)}</StartPrice>${details ? `<ListingDetails>${details}</ListingDetails>` : ''}</Item></ReviseFixedPriceItemRequest>`;
+}
+
+const ackOk = xml => ['Success', 'Warning'].includes(tag(xml, 'Ack'));
+const errorsOf = xml => [...new Set(tags(xml, 'Errors').filter(e => tag(e, 'SeverityCode') === 'Error')
+  .map(e => tag(e, 'LongMessage') || tag(e, 'ShortMessage')))].filter(Boolean).join(' | ');
+
+export async function reviseWithBestOffer(token, change, call = tradingCall) {
+  const item = parseBestOffer(await call(token, 'GetItem', buildGetItemXml(change.itemId)));
+  const oldPrice = item.startPrice ?? Number(change.oldPrice);
+  const scaled = scaleBestOffer({ oldPrice, newPrice: change.newPrice, decline: item.decline, accept: item.accept });
+  const xml = await call(token, 'ReviseFixedPriceItem', buildReviseFixedPriceXml({ itemId: change.itemId, newPrice: change.newPrice, ...scaled }));
+  if (!ackOk(xml)) throw new Error(errorsOf(xml) || `eBay returned ${tag(xml, 'Ack') || 'Failure'}`);
+  const warnings = [];
+  if (item.decline != null) warnings.push(`Best Offer auto-decline ${money2(item.decline)} → ${scaled.decline != null ? money2(scaled.decline) : 'off'}`);
+  if (item.accept != null) warnings.push(`Best Offer auto-accept ${money2(item.accept)} → ${scaled.accept != null ? money2(scaled.accept) : 'off'}`);
+  return { itemId: change.itemId, ok: true, price: change.newPrice, error: null, warnings };
+}
+
 export async function revisePrices(token, changes, call = tradingCall) {
   const results = [];
   for (const batch of chunk(changes)) {
@@ -81,6 +144,17 @@ export async function revisePrices(token, changes, call = tradingCall) {
       results.push(...parseReviseResponse(xml, batch));
     } catch (err) {
       results.push(...batch.map(c => ({ itemId: c.itemId, ok: false, price: null, error: err.message, warnings: [] })));
+    }
+  }
+  // Retry, one at a time, the items eBay refused because of their Best Offer settings.
+  const byId = new Map(changes.map(c => [String(c.itemId), c]));
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.ok || !BEST_OFFER_ERROR.test(r.error || '')) continue;
+    try {
+      results[i] = await reviseWithBestOffer(token, byId.get(String(r.itemId)), call);
+    } catch (err) {
+      results[i] = { ...r, error: `${r.error} (Best Offer retry failed: ${err.message})` };
     }
   }
   return results;

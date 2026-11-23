@@ -27,7 +27,7 @@ test('recompute auto-marks item-id match sold, suggests title match, stores P&L'
     settings: [],
   });
   const r = await recompute(db, U, ['O1']);
-  assert.deepEqual(r, { autoMarkedSold: 1, suggested: 1 });
+  assert.deepEqual(r, { autoMarkedSold: 1, suggested: 1, restocked: 0 });
   const inv = db.tables.inventory;
   assert.equal(inv[0].status, 'Sold');
   assert.equal(inv[0].ebay_order_line_id, 'A');
@@ -44,5 +44,31 @@ test('recompute auto-marks item-id match sold, suggests title match, stores P&L'
 
   // Running again doesn't double-mark anything.
   const r2 = await recompute(db, U, ['O1']);
-  assert.deepEqual(r2, { autoMarkedSold: 0, suggested: 0 });
+  assert.deepEqual(r2, { autoMarkedSold: 0, suggested: 0, restocked: 0 });
+});
+
+test('a cancelled order puts its auto-matched card back in stock and can be re-matched later', async () => {
+  const { order, lines } = normalizeOrder({
+    orderId: 'O2', creationDate: '2026-11-12T12:00:00Z',
+    pricingSummary: { priceSubtotal: { value: '40' }, deliveryCost: { value: '0' }, total: { value: '40' } },
+    lineItems: [{ lineItemId: 'C', legacyItemId: '777', title: 'Charizard VMAX', quantity: 1, lineItemCost: { value: '40' } }],
+  }, U);
+  const db = fakeDb({
+    ebay_orders: [order],
+    ebay_order_lines: lines.map((l) => ({ ...l, match_status: 'unmatched' })),
+    ebay_transactions: [],
+    inventory: [{ id: 'i9', user_id: U, card_name: 'Charizard VMAX', status: 'In Stock', cost_basis: 10, ebay_item_id: '777' }],
+    settings: [],
+  });
+  assert.equal((await recompute(db, U, ['O2'])).autoMarkedSold, 1);
+  assert.equal(db.tables.inventory[0].status, 'Sold');
+
+  db.tables.ebay_orders[0].cancel_state = 'CANCELED'; // buyer cancels; next sync sees it
+  const r = await recompute(db, U, ['O2']);
+  assert.equal(r.restocked, 1);
+  assert.equal(db.tables.inventory[0].status, 'In Stock');
+  assert.equal(db.tables.inventory[0].ebay_order_line_id, null);
+  assert.equal(db.tables.ebay_order_lines[0].inventory_id, null);
+  assert.equal(db.tables.ebay_order_lines[0].net_payout, 0);
+  assert.equal((await recompute(db, U, ['O2'])).autoMarkedSold, 0); // cancelled lines are never re-matched
 });

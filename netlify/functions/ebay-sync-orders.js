@@ -54,13 +54,15 @@ export default async (req) => {
   const db = getSupabaseAdmin();
 
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = (await req.json().catch(() => null)) || {};
+    const days = body.days == null || body.days === '' ? null : Number(body.days);
+    if (days !== null && !(days > 0)) return json({ error: 'days must be a positive number of days to look back (max 730).' }, 400);
     const account = await must(db.from('ebay_accounts').select('orders_synced_at').eq('user_id', userId).maybeSingle());
     if (!account) return json({ error: 'Connect your eBay seller account first.' }, 409);
 
     const now = new Date();
     let from;
-    if (body.days) from = new Date(now - Math.min(Number(body.days), 730) * 864e5);
+    if (days) from = new Date(now - Math.min(days, 730) * 864e5);
     else if (account.orders_synced_at) from = new Date(new Date(account.orders_synced_at) - OVERLAP_HOURS * 36e5);
     else from = new Date(now - FIRST_SYNC_DAYS * 864e5);
     const fromIso = from.toISOString(), toIso = now.toISOString();
@@ -102,7 +104,7 @@ export default async (req) => {
 };
 
 export async function recompute(db, userId, orderIds) {
-  if (!orderIds.length) return { autoMarkedSold: 0, suggested: 0 };
+  if (!orderIds.length) return { autoMarkedSold: 0, suggested: 0, restocked: 0 };
   const allLines = [], allOrders = [], allTxns = [];
   for (const c of chunk(orderIds, 100)) {
     allOrders.push(...await must(db.from('ebay_orders').select('*').eq('user_id', userId).in('order_id', c)));
@@ -110,13 +112,28 @@ export async function recompute(db, userId, orderIds) {
     allTxns.push(...await must(db.from('ebay_transactions').select('*').eq('user_id', userId).in('order_id', c)));
   }
   const inventory = await must(db.from('inventory')
-    .select('id, card_name, status, cost_basis, ebay_item_id, sku, ebay_order_line_id').eq('user_id', userId));
+    .select('id, card_name, status, cost_basis, cost_source, ebay_item_id, sku, ebay_order_line_id, created_at').eq('user_id', userId));
   const settingsRow = await must(db.from('settings').select('data').eq('user_id', userId).maybeSingle());
   const settings = settingsRow?.data || {};
 
-  // ---- match unmatched, non-cancelled lines to inventory ----
   const orderById = new Map(allOrders.map((o) => [o.order_id, o]));
-  const candidates = allLines.filter((l) => l.match_status === 'unmatched' && orderById.get(l.order_id)?.cancel_state !== 'CANCELED');
+
+  // ---- cancelled after we marked the card sold: put it back in stock ----
+  let restocked = 0;
+  for (const l of allLines) {
+    if (l.inventory_id && ['auto', 'confirmed'].includes(l.match_status) && orderById.get(l.order_id)?.cancel_state === 'CANCELED') {
+      await releaseInventory(db, userId, l.inventory_id, l.line_item_id);
+      const inv = inventory.find((i) => i.id === l.inventory_id);
+      if (inv) Object.assign(inv, { status: 'In Stock', ebay_order_line_id: null });
+      Object.assign(l, { inventory_id: null, match_status: 'unmatched', match_method: null, match_confidence: null });
+      restocked++;
+    }
+  }
+
+  // ---- match unmatched, non-cancelled lines to inventory ----
+  const candidates = allLines
+    .filter((l) => l.match_status === 'unmatched' && orderById.get(l.order_id)?.cancel_state !== 'CANCELED')
+    .map((l) => ({ ...l, sold_at_hint: orderById.get(l.order_id)?.created_at_ebay || null }));
   const matches = matchLinesToInventory(candidates, inventory);
   let autoMarkedSold = 0, suggested = 0;
   for (const m of matches) {
@@ -134,10 +151,12 @@ export async function recompute(db, userId, orderIds) {
   // ---- P&L ----
   const invById = new Map(inventory.map((i) => [i.id, i]));
   const costByLine = new Map();
+  const estimatedLines = new Set();
   for (const l of allLines) {
     if (l.inventory_id && ['auto', 'confirmed'].includes(l.match_status)) {
       const inv = invById.get(l.inventory_id);
       if (inv?.cost_basis != null) costByLine.set(l.line_item_id, Number(inv.cost_basis));
+      if (inv?.cost_basis != null && inv.cost_source === 'estimated') estimatedLines.add(l.line_item_id);
     }
   }
   const pnl = computeLinePnl({ orders: allOrders, lines: allLines, txns: allTxns, costByLine, settings });
@@ -148,11 +167,12 @@ export async function recompute(db, userId, orderIds) {
       inventory_id: l.inventory_id, match_method: l.match_method, match_status: l.match_status, match_confidence: l.match_confidence,
       gross: r.gross, fees: r.fees, fee_source: r.fee_source, shipping_label: r.shipping_label, ad_fees: r.ad_fees,
       refunds: r.refunds, other: r.other, net_payout: r.net_payout, cost_basis: r.cost_basis, profit: r.profit, sold_at: r.sold_at,
+      cost_estimated: estimatedLines.has(r.line_item_id),
       updated_at: new Date().toISOString(),
     };
   });
   for (const c of chunk(updates, 200)) await must(db.from('ebay_order_lines').upsert(c, { onConflict: 'user_id,line_item_id' }));
-  return { autoMarkedSold, suggested };
+  return { autoMarkedSold, suggested, restocked };
 }
 
 export async function markInventorySold(db, userId, inventoryId, line, order) {
@@ -164,6 +184,14 @@ export async function markInventorySold(db, userId, inventoryId, line, order) {
     ebay_order_line_id: line.line_item_id,
     updated_at: new Date().toISOString(),
   }).eq('user_id', userId).eq('id', inventoryId));
+}
+
+// Undo markInventorySold, but only if the card is still linked to this sale.
+export async function releaseInventory(db, userId, inventoryId, lineItemId) {
+  await must(db.from('inventory').update({
+    status: 'In Stock', sold_at: null, sale_price: null, sale_channel: null, ebay_order_line_id: null,
+    updated_at: new Date().toISOString(),
+  }).eq('user_id', userId).eq('id', inventoryId).eq('ebay_order_line_id', lineItemId));
 }
 
 export const config = { path: '/api/ebay-sync-orders' };

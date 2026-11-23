@@ -11,10 +11,12 @@ export async function fetchSellerListings() {
   return readJson(await apiFetch('/api/seller-listings'));
 }
 
+// The Repricer only calls this after the user has seen every change (and its warnings) in the
+// review screen, so large changes are confirmed here. The server refuses them without this flag.
 export async function pushPriceChanges(changes) {
   return readJson(await apiFetch('/api/seller-reprice', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ changes }),
+    body: JSON.stringify({ changes, confirmLargeChanges: true }),
   }));
 }
