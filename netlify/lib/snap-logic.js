@@ -8,6 +8,8 @@ export const SNAP_DEFAULTS = {
   snapMinPrice: 0.99,     // never list below this
   snapEnding: '0.89',     // round up to this ending: '0.89' | '0.98' | '0.99' | '0.49' | 'cents'
   aiMonthlyBudget: 25,    // USD of estimated Claude spend per calendar month; 0 = no limit
+  snapShipCutoff: 20,     // list price under this uses the envelope shipping policy, at or over it the parcel one
+  snapDescriptionFooter: '', // seller's own note added to every listing description (packaging, shipping...)
 };
 
 export const CONFIDENCE_OK = 0.8;

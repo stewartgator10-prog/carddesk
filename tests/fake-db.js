@@ -11,9 +11,9 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
       }),
     },
     from(name) {
-      const filters = []; let op = 'select', payload = null, single = false, conflict = null;
+      const filters = []; let op = 'select', payload = null, single = false, conflict = null, returning = false;
       const b = {
-        select() { return b; },
+        select() { if (op !== 'select') returning = true; return b; },
         eq(c, v) { filters.push((r) => r[c] === v); return b; },
         in(c, vs) { filters.push((r) => vs.includes(r[c])); return b; },
         is(c, v) { filters.push((r) => r[c] === v); return b; },
@@ -33,8 +33,9 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
               return Promise.resolve({ data: single ? out[0] || null : out, error: null }).then(res, rej);
             }
             if (op === 'update') {
-              rows.filter((r) => filters.every((f) => f(r))).forEach((r) => Object.assign(r, payload));
-              return Promise.resolve({ data: null, error: null }).then(res, rej);
+              const hit = rows.filter((r) => filters.every((f) => f(r)));
+              hit.forEach((r) => Object.assign(r, payload));
+              return Promise.resolve({ data: returning ? hit.map((r) => ({ ...r })) : null, error: null }).then(res, rej);
             }
             if (op === 'delete') {
               const keep = rows.filter((r) => !filters.every((f) => f(r)));

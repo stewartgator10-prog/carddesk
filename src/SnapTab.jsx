@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, FlaskConical, DollarSign, Settings as Cog, Image as ImageIcon } from 'lucide-react';
+import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, FlaskConical, DollarSign, Settings as Cog, Image as ImageIcon, Store } from 'lucide-react';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
@@ -9,12 +9,15 @@ import { splitCost } from '../netlify/lib/cost-split.js';
 const money = (n, d = 2) => (n == null || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(d)}`);
 const fee = (n) => (n == null ? '—' : Number(n) < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
 const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
-const OPEN = ['uploaded', 'identifying', 'ready', 'needs_review', 'failed', 'approved'];
+const OPEN = ['uploaded', 'identifying', 'ready', 'needs_review', 'failed', 'approved', 'listed'];
+const DONE = ['approved', 'listed'];
+// Editing any of these after the eBay check means the check no longer describes the listing.
+const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'back_photo_path'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 const STATUS = {
   uploaded: ['QUEUED', '#8a8a96'], identifying: ['READING…', '#fbbf24'], ready: ['READY', '#4ade80'],
-  needs_review: ['CHECK', '#fbbf24'], failed: ['FAILED', '#ff6b6b'], approved: ['APPROVED', '#60a5fa'],
+  needs_review: ['CHECK', '#fbbf24'], failed: ['FAILED', '#ff6b6b'], approved: ['APPROVED', '#60a5fa'], listed: ['ON EBAY', '#4ade80'],
 };
 
 async function postJson(path, body) {
@@ -123,6 +126,10 @@ export default function SnapTab({ userId, settings, setSettings }) {
   }
 
   async function save(id, patch) {
+    const cur = items.find((x) => x.id === id);
+    if (cur && ['checked', 'check_failed'].includes(cur.publish_state) && Object.keys(patch).some((k) => LISTING_FIELDS.includes(k) && patch[k] !== cur[k])) {
+      patch = { ...patch, publish_state: null, publish_check: null };
+    }
     patchLocal(id, patch);
     const { error } = await supabase.from('snap_items').update(patch).eq('id', id);
     if (error) setMsg({ type: 'error', text: `Couldn't save: ${error.message}` });
@@ -140,7 +147,62 @@ export default function SnapTab({ userId, settings, setSettings }) {
     const ids = ready.map((i) => i.id);
     setItems((xs) => xs.map((x) => (ids.includes(x.id) ? { ...x, status: 'approved' } : x)));
     const { error } = await supabase.from('snap_items').update({ status: 'approved' }).in('id', ids);
-    setMsg(error ? { type: 'error', text: error.message } : { type: 'ok', text: `Approved ${ids.length} card${ids.length === 1 ? '' : 's'}. They'll be published to eBay in phase 2.` });
+    setMsg(error ? { type: 'error', text: error.message } : { type: 'ok', text: `Approved ${ids.length} card${ids.length === 1 ? '' : 's'}. Open "Approved" to check and publish them on eBay.` });
+  }
+
+  // ---------- eBay: optional back photo, free check, publish ----------
+  async function addBackPhoto(item, file) {
+    try {
+      const blob = await resizeForUpload(file);
+      const path = `${userId}/${item.batch_id || 'back'}/${item.id}-back.jpg`;
+      const up = await supabase.storage.from('snap-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+      if (up.error) throw new Error(up.error.message);
+      setPhotoUrls((u) => ({ ...u, [path]: URL.createObjectURL(blob) }));
+      await save(item.id, { back_photo_path: path, ebay_picture_urls: null });
+    } catch (e) { setMsg({ type: 'error', text: `Back photo failed: ${e.message}` }); }
+  }
+
+  const [ebayBusy, setEbayBusy] = useState(null); // { label, done, total }
+  async function ebayLoop(label, list, action) {
+    setEbayBusy({ label, done: 0, total: list.length }); setMsg(null);
+    let ok = 0; const problems = [];
+    for (const [n, it] of list.entries()) {
+      patchLocal(it.id, { publish_state: action === 'check' ? 'checking' : 'publishing' });
+      const r = await postJson('/api/snap-publish', { action, id: it.id }).catch((e) => ({ ok: false, data: { error: e.message } }));
+      if (r.ok && action === 'check') {
+        // The request worked; whether eBay would accept the listing is in the check itself.
+        patchLocal(it.id, r.data.item);
+        if (r.data.item?.publish_check?.ok) ok += 1;
+        else problems.push(`${it.title || it.card_name}: ${(r.data.item?.publish_check?.errors || ['eBay check failed'])[0]}`);
+      } else if (r.ok) {
+        ok += 1;
+        patchLocal(it.id, { status: 'listed', publish_state: 'listed', ebay_item_id: r.data.result.itemId, ebay_url: r.data.result.url });
+      } else {
+        problems.push(`${it.title || it.card_name}: ${r.data.error || r.status}`);
+        patchLocal(it.id, { publish_state: action === 'check' ? 'check_failed' : 'failed', publish_error: r.data.error });
+        if (r.status === 409 && /learn your listing setup|connect your ebay/i.test(r.data.error || '')) { setMsg({ type: 'error', text: r.data.error }); break; }
+      }
+      setEbayBusy({ label, done: n + 1, total: list.length });
+    }
+    setEbayBusy(null);
+    await loadItems();
+    return { ok, problems };
+  }
+
+  async function checkApproved() {
+    const list = items.filter((i) => i.status === 'approved' && i.publish_state !== 'checked');
+    const { ok, problems } = await ebayLoop('Checking with eBay', list, 'check');
+    setMsg(problems.length ? { type: 'error', text: `${ok} passed, ${problems.length} need fixing: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `All ${ok} passed eBay's check. Nothing is listed yet.` });
+  }
+
+  async function publishChecked() {
+    const list = items.filter((i) => i.status === 'approved' && i.publish_state === 'checked' && i.publish_check?.ok);
+    if (!list.length) return;
+    const fees = list.reduce((t, i) => t + Number(i.publish_check?.fees?.total || 0), 0);
+    const value = list.reduce((t, i) => t + Number(i.price || 0), 0);
+    if (!window.confirm(`Publish ${list.length} listing${list.length === 1 ? '' : 's'} on eBay now?\n\nTotal list price: $${value.toFixed(2)}\nListing fees from eBay's check: $${fees.toFixed(2)}\n\nThey go live immediately as Buy It Now (Good 'Til Cancelled).`)) return;
+    const { ok, problems } = await ebayLoop('Publishing to eBay', list, 'publish');
+    setMsg(problems.length ? { type: 'error', text: `${ok} listed, ${problems.length} failed: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `${ok} card${ok === 1 ? '' : 's'} listed on eBay and added to inventory with their cost.` });
   }
 
   // One order's total (cards + shipping + tax) split across the cards on screen by market value.
@@ -166,7 +228,9 @@ export default function SnapTab({ userId, settings, setSettings }) {
   }
 
   const counts = useMemo(() => Object.fromEntries(OPEN.map((st) => [st, items.filter((i) => i.status === st).length])), [items]);
-  const visible = items.filter((i) => (filter === 'open' ? i.status !== 'approved' : i.status === filter));
+  const visible = items.filter((i) => (filter === 'open' ? !DONE.includes(i.status) : i.status === filter));
+  const toCheck = items.filter((i) => i.status === 'approved' && i.publish_state !== 'checked').length;
+  const toPublish = items.filter((i) => i.status === 'approved' && i.publish_state === 'checked' && i.publish_check?.ok).length;
   const monthSpend = usage.month.reduce((t, r) => t + Number(r.cost_usd || 0), 0);
   const budget = Number(s.aiMonthlyBudget) || 0;
 
@@ -193,7 +257,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
       </section>
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {tabBtn('queue', <ImageIcon size={14} />, `Review queue (${items.filter((i) => i.status !== 'approved').length})`)}
+        {tabBtn('queue', <ImageIcon size={14} />, `Review queue (${items.filter((i) => !DONE.includes(i.status)).length})`)}
         {tabBtn('fees', <DollarSign size={14} />, 'API fees')}
         {tabBtn('trial', <FlaskConical size={14} />, 'Model trial')}
         {tabBtn('settings', <Cog size={14} />, 'Settings')}
@@ -205,25 +269,30 @@ export default function SnapTab({ userId, settings, setSettings }) {
       {panel === 'queue' && (
         <>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {[['open', `To do (${items.filter((i) => i.status !== 'approved').length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`]].map(([k, l]) => (
+            {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`]].map(([k, l]) => (
               <button key={k} className="btn-ghost" onClick={() => setFilter(k)} style={{ padding: '6px 10px', fontSize: '0.7rem', borderColor: filter === k ? '#ff4d4d' : undefined, color: filter === k ? '#ff4d4d' : undefined }}>{l}</button>
             ))}
             <span style={{ flex: 1 }} />
             <button className="btn-ghost" onClick={loadItems} title="Reload" style={{ padding: '6px 10px' }}><RefreshCw size={14} /></button>
             <button className="btn-ghost" disabled={!visible.length} onClick={batchPurchase} title="Split what you paid for these cards across them" style={{ padding: '6px 10px', fontSize: '0.7rem' }}>$ Purchase cost</button>
-            <button className="btn-primary" disabled={!counts.ready} onClick={approveAllReady} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Check size={14} /> APPROVE ALL READY ({counts.ready})</button>
+            {filter !== 'approved' && filter !== 'listed' && <button className="btn-primary" disabled={!counts.ready} onClick={approveAllReady} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Check size={14} /> APPROVE ALL READY ({counts.ready})</button>}
+            {filter === 'approved' && <>
+              <button className="btn-ghost" disabled={!toCheck || !!ebayBusy} onClick={checkApproved} title="Uploads photos and runs eBay's free listing check. Nothing goes live." style={{ padding: '8px 12px', fontSize: '0.75rem' }}>CHECK {toCheck} WITH EBAY</button>
+              <button className="btn-primary" disabled={!toPublish || !!ebayBusy} onClick={publishChecked} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Store size={14} /> PUBLISH {toPublish} TO EBAY</button>
+            </>}
           </div>
+          {ebayBusy && <div className="accent-amber" style={{ fontSize: '0.8rem' }}><Loader size={12} className="spin" /> {ebayBusy.label}: {ebayBusy.done} of {ebayBusy.total}…</div>}
           {visible.length === 0 ? (
             <div className="bg-card ink-faint" style={{ padding: 48, textAlign: 'center' }}>
               {items.length ? 'Nothing here.' : 'No cards yet. Tap SNAP CARDS to photograph a stack.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} backPhoto={photoUrls[it.back_photo_path]} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onBack={(f) => addBackPhoto(it, f)} />)}
             </div>
           )}
           <div className="ink-faint" style={{ fontSize: '0.7rem' }}>
-            Phase 1 stops at Approved. Publishing approved cards to eBay with their photos is phase 2.
+            Approved cards: CHECK uploads the photos and runs eBay's free listing check (nothing goes live). PUBLISH lists the cards that passed, using your learned listing setup (Snap settings).
           </div>
         </>
       )}
@@ -235,7 +304,8 @@ export default function SnapTab({ userId, settings, setSettings }) {
   );
 }
 
-function SnapCard({ it, photo, onSave, onApprove, onDiscard, onRetry }) {
+function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry, onBack }) {
+  const backInput = useRef(null);
   const [d, setD] = useState(it);
   useEffect(() => { setD(it); }, [it]);
   const [label, color] = STATUS[it.status] || [it.status, '#8a8a96'];
@@ -262,6 +332,16 @@ function SnapCard({ it, photo, onSave, onApprove, onDiscard, onRetry }) {
           {it.catalog_source && <span style={{ position: 'absolute', bottom: 2, right: 4, fontSize: '0.6rem' }} className="ink-faint">{it.catalog_source}</span>}
         </div>
       </div>
+      {!busy && it.status !== 'listed' && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.7rem' }}>
+          <input ref={backInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onBack(e.target.files[0]); e.target.value = ''; }} />
+          {it.back_photo_path && backPhoto && <img src={backPhoto} alt="Back" style={{ width: 28, height: 39, objectFit: 'cover' }} />}
+          <button className="btn-ghost" onClick={() => backInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+            <Camera size={12} /> {it.back_photo_path ? 'Retake back' : 'Add back photo'}
+          </button>
+          <span className="ink-faint">{it.back_photo_path ? 'Front + back go on eBay' : 'Optional: front only otherwise'}</span>
+        </div>
+      )}
 
       {it.error && <div className="accent-red" style={{ fontSize: '0.75rem' }}>{it.error}</div>}
       {(it.review_reasons || []).length > 0 && (
@@ -280,7 +360,16 @@ function SnapCard({ it, photo, onSave, onApprove, onDiscard, onRetry }) {
         </div>
       )}
 
-      {!busy && it.status !== 'failed' && (
+      {it.status === 'listed' && (
+        <div style={{ fontSize: '0.8rem', padding: 8, border: '1px solid #4ade80' }}>
+          <div className="accent-green" style={{ fontWeight: 600 }}>{it.title}</div>
+          <div className="ink-dim">{money(it.price)}{it.cost_basis != null ? ` · cost ${money(it.cost_basis)}` : ''} · listed {it.listed_at ? new Date(it.listed_at).toLocaleDateString() : ''}</div>
+          {it.ebay_url && <a href={it.ebay_url} target="_blank" rel="noreferrer" className="accent-green" style={{ fontSize: '0.75rem' }}>View on eBay #{it.ebay_item_id} <ExternalLink size={10} /></a>}
+        </div>
+      )}
+      {it.status === 'approved' && <PublishStatus it={it} />}
+
+      {!busy && it.status !== 'failed' && it.status !== 'listed' && (
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 6 }}>
           <input className="bg-input" style={inp} value={d.card_name || ''} placeholder="Card name" onChange={(e) => field('card_name', e.target.value)} onBlur={() => commit({ card_name: d.card_name })} />
           <input className="bg-input" style={inp} value={d.catalog_number || d.collector_number || ''} placeholder="Number" onChange={(e) => field('catalog_number', e.target.value)} onBlur={() => commit({ catalog_number: d.catalog_number })} />
@@ -307,12 +396,33 @@ function SnapCard({ it, photo, onSave, onApprove, onDiscard, onRetry }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 6 }}>
+      {it.status !== 'listed' && <div style={{ display: 'flex', gap: 6 }}>
         {it.status !== 'approved' && <button className="btn-primary" disabled={busy || it.status === 'failed'} onClick={() => onApprove({ ...it, ...d })} style={{ padding: '6px 10px', flex: 1, display: 'inline-flex', gap: 4, alignItems: 'center', justifyContent: 'center' }}><Check size={13} /> Approve</button>}
         {it.status === 'approved' && <button className="btn-ghost" onClick={() => onSave(it.id, { status: 'needs_review' })} style={{ padding: '6px 10px', flex: 1, fontSize: '0.75rem' }}>Undo approve</button>}
         <button className="btn-ghost" disabled={busy || it.status === 'approved'} onClick={onRetry} title="Read the photo again (costs another AI call)" style={{ padding: '6px 10px' }}><RefreshCw size={13} /></button>
-        <button className="btn-ghost" onClick={() => onDiscard(it)} title="Discard" style={{ padding: '6px 10px' }}><X size={13} /></button>
-      </div>
+        <button className="btn-ghost" disabled={['checking', 'publishing'].includes(it.publish_state)} onClick={() => onDiscard(it)} title="Discard" style={{ padding: '6px 10px' }}><X size={13} /></button>
+      </div>}
+    </div>
+  );
+}
+
+// eBay check / publish state for an approved card.
+function PublishStatus({ it }) {
+  const c = it.publish_check;
+  if (it.publish_state === 'checking' || it.publish_state === 'publishing') {
+    return <div className="accent-amber" style={{ fontSize: '0.75rem' }}><Loader size={11} className="spin" /> {it.publish_state === 'checking' ? 'Checking with eBay…' : 'Publishing…'}</div>;
+  }
+  if (it.publish_state === 'failed') return <div className="accent-red" style={{ fontSize: '0.75rem' }}>Publish failed: {it.publish_error}</div>;
+  if (!c) {
+    return <div className="ink-faint" style={{ fontSize: '0.7rem' }}>{it.publish_error ? <span className="accent-red">{it.publish_error}</span> : 'Not checked with eBay yet.'}</div>;
+  }
+  return (
+    <div style={{ fontSize: '0.72rem', padding: 6, border: `1px solid ${c.ok ? '#4ade80' : '#f87171'}` }}>
+      {c.ok
+        ? <div className="accent-green">Passed eBay's check · listing fee {money(c.fees?.total || 0)}{c.shippingProfile ? ` · ${c.shippingProfile.replace(/\s*\(\d+\)\s*$/, '')}` : ''}</div>
+        : <div className="accent-red">eBay would reject this listing:</div>}
+      {(c.errors || []).map((e, i) => <div key={`e${i}`} className="accent-red">• {e}</div>)}
+      {(c.warnings || []).slice(0, 3).map((w, i) => <div key={`w${i}`} className="accent-amber">• {w}</div>)}
     </div>
   );
 }
@@ -516,6 +626,63 @@ function SnapSettings({ s, settings, setSettings }) {
       <div><label>Monthly AI budget $ (0 = no limit)</label><input className="bg-input" type="number" step="1" value={s.aiMonthlyBudget} onChange={(e) => set('aiMonthlyBudget', e.target.value === '' ? 0 : Number(e.target.value))} />
         <div className="ink-faint" style={{ fontSize: '0.7rem', marginTop: 4 }}>New AI calls stop when this month's estimated spend reaches the budget. Nothing already done is affected.</div></div>
       <div className="ink-faint" style={{ fontSize: '0.7rem' }}>Example: market $0.27 → {s.snapMinPrice ? `$${Number(s.snapMinPrice).toFixed(2)}` : ''} (minimum). Market $4.74 → rounded up to the {s.snapEnding === 'cents' ? 'cent' : `next ${s.snapEnding.slice(1)}`} after markup.</div>
+      <ListingSetup s={s} set={set} />
     </section>
+  );
+}
+
+// eBay listing setup copied from the seller's own listings, plus the two choices that stay theirs.
+function ListingSetup({ s, set }) {
+  const [state, setState] = useState({ loading: true, templates: null, connected: false });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    apiFetch('/api/snap-publish').then((r) => r.json()).then((d) => setState({ loading: false, templates: d.templates || null, connected: !!d.connected }))
+      .catch(() => setState({ loading: false, templates: null, connected: false }));
+  }, []);
+  async function learn() {
+    setBusy(true); setErr(null);
+    const r = await postJson('/api/snap-publish', { action: 'learn' }).catch((e) => ({ ok: false, data: { error: e.message } }));
+    if (r.ok) setState((x) => ({ ...x, templates: r.data.templates })); else setErr(r.data.error || `Failed (${r.status})`);
+    setBusy(false);
+  }
+  const t = state.templates;
+  const p = t?.policies || {};
+  const strip = (n) => (n || '').replace(/\s*\(\d+\)\s*$/, '');
+  const row = (k, v) => v ? <div><span className="ink-faint">{k}: </span>{v}</div> : null;
+  const tpl = t?.pokemon || t?.mtg;
+  return (
+    <div style={{ borderTop: '1px solid #2a2a36', paddingTop: 12, display: 'grid', gap: 10 }}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>EBAY LISTING SETUP</h3>
+      <div className="ink-dim" style={{ fontSize: '0.75rem' }}>New listings copy the setup of your own newest Pokémon and Magic listings: category, condition codes, item details, ship-from location, return and payment policies, and Best Offer %.</div>
+      {state.loading ? <Loader size={14} className="spin ink-faint" /> : !state.connected ? (
+        <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Connect your eBay account on the eBay Listings tab first.</div>
+      ) : (
+        <>
+          {t ? (
+            <div style={{ fontSize: '0.75rem', display: 'grid', gap: 3, padding: 10, border: '1px solid #2a2a36' }}>
+              {row('Learned', `${new Date(t.learnedAt).toLocaleString()} from ${[t.pokemon && 'a Pokémon listing', t.mtg && 'a Magic listing'].filter(Boolean).join(' and ')}`)}
+              {row('Category', tpl?.categoryId)}
+              {row('Condition codes', t.conditions?.source === 'ebay' ? "from eBay's official list" : 'standard codes (eBay list unavailable)')}
+              {row('Ships from', [tpl?.location, tpl?.postalCode].filter(Boolean).join(' '))}
+              {row(`Under $${s.snapShipCutoff}`, strip(p.envelope?.name) || strip(p.parcel?.name))}
+              {row(`$${s.snapShipCutoff} and up`, strip(p.parcel?.name) || strip(p.envelope?.name))}
+              {row('Returns', strip(p.returnProfile?.name))}
+              {row('Best Offer', tpl?.bestOffer?.enabled ? `on${tpl.bestOffer.declinePct ? `, auto-decline below ${tpl.bestOffer.declinePct}% of price` : ''}${tpl.bestOffer.acceptPct ? `, auto-accept at ${tpl.bestOffer.acceptPct}%` : ''}` : 'off')}
+            </div>
+          ) : <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Not learned yet. Publishing needs this once.</div>}
+          <button className="btn-ghost" disabled={busy} onClick={learn} style={{ padding: '8px 12px', justifySelf: 'start', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            {busy ? <Loader size={13} className="spin" /> : <RefreshCw size={13} />} {t ? 'Re-learn from my listings' : 'Learn from my eBay listings'}
+          </button>
+          {err && <div className="accent-red" style={{ fontSize: '0.75rem' }}>{err}</div>}
+        </>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
+        <div><label htmlFor="ship-cutoff">Parcel from $</label><input id="ship-cutoff" className="bg-input" type="number" step="1" min="0" value={s.snapShipCutoff} onChange={(e) => set('snapShipCutoff', e.target.value === '' ? 20 : Number(e.target.value))} /></div>
+        <div className="ink-faint" style={{ fontSize: '0.7rem', alignSelf: 'end' }}>Cards priced under this use your envelope shipping policy; at or above it, your parcel policy.</div>
+      </div>
+      <div><label htmlFor="desc-footer">Note added to every description (optional)</label>
+        <textarea id="desc-footer" className="bg-input" rows={3} value={s.snapDescriptionFooter || ''} placeholder="e.g. Ships in a penny sleeve and top loader within 3 business days." onChange={(e) => set('snapDescriptionFooter', e.target.value)} /></div>
+    </div>
   );
 }
