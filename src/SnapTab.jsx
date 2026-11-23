@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, FlaskConical, DollarSign, Settings as Cog, Image as ImageIcon, Store } from 'lucide-react';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
+import CropImg from './lib/CropImg.jsx';
 import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
@@ -162,6 +163,20 @@ export default function SnapTab({ userId, settings, setSettings }) {
     } catch (e) { setMsg({ type: 'error', text: `Back photo failed: ${e.message}` }); }
   }
 
+  // Cards from a buy-offer binder page start with only part of the page photo; this swaps in a real one.
+  async function replacePhoto(item, file) {
+    try {
+      const blob = await resizeForUpload(file);
+      const path = `${userId}/${item.batch_id || 'snap'}/${item.id}-front-${Date.now()}.jpg`;
+      const up = await supabase.storage.from('snap-photos').upload(path, blob, { contentType: 'image/jpeg' });
+      if (up.error) throw new Error(up.error.message);
+      setPhotoUrls((u) => ({ ...u, [path]: URL.createObjectURL(blob) }));
+      const reasons = (item.review_reasons || []).filter((r) => r !== 'page_photo');
+      await save(item.id, { photo_path: path, photo_crop: null, review_reasons: reasons, ebay_picture_urls: null, publish_state: null, publish_check: null,
+        ...(item.status === 'needs_review' && !reasons.length ? { status: 'ready' } : {}) });
+    } catch (e) { setMsg({ type: 'error', text: `Photo failed: ${e.message}` }); }
+  }
+
   const [ebayBusy, setEbayBusy] = useState(null); // { label, done, total }
   async function ebayLoop(label, list, action) {
     setEbayBusy({ label, done: 0, total: list.length }); setMsg(null);
@@ -288,7 +303,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} backPhoto={photoUrls[it.back_photo_path]} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onBack={(f) => addBackPhoto(it, f)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} backPhoto={photoUrls[it.back_photo_path]} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onBack={(f) => addBackPhoto(it, f)} onReplace={(f) => replacePhoto(it, f)} />)}
             </div>
           )}
           <div className="ink-faint" style={{ fontSize: '0.7rem' }}>
@@ -304,8 +319,9 @@ export default function SnapTab({ userId, settings, setSettings }) {
   );
 }
 
-function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry, onBack }) {
+function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry, onBack, onReplace }) {
   const backInput = useRef(null);
+  const frontInput = useRef(null);
   const [d, setD] = useState(it);
   useEffect(() => { setD(it); }, [it]);
   const [label, color] = STATUS[it.status] || [it.status, '#8a8a96'];
@@ -323,7 +339,7 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         <div style={{ aspectRatio: '5 / 7', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {photo ? <img src={photo} alt="Your photo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <Loader size={14} className="spin ink-faint" />}
+          {photo ? (it.photo_crop ? <CropImg url={photo} box={it.photo_crop} alt="Your photo (from a binder page)" /> : <img src={photo} alt="Your photo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />) : <Loader size={14} className="spin ink-faint" />}
         </div>
         <div style={{ aspectRatio: '5 / 7', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
           {it.catalog_image_url
@@ -335,6 +351,8 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
       {!busy && it.status !== 'listed' && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.7rem' }}>
           <input ref={backInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onBack(e.target.files[0]); e.target.value = ''; }} />
+          <input ref={frontInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onReplace(e.target.files[0]); e.target.value = ''; }} />
+          {it.photo_crop && <button className="btn-primary" onClick={() => frontInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}><Camera size={12} /> Replace photo</button>}
           {it.back_photo_path && backPhoto && <img src={backPhoto} alt="Back" style={{ width: 28, height: 39, objectFit: 'cover' }} />}
           <button className="btn-ghost" onClick={() => backInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
             <Camera size={12} /> {it.back_photo_path ? 'Retake back' : 'Add back photo'}

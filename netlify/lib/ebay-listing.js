@@ -288,6 +288,7 @@ export async function checkSnapItem({ db, userId, token, item, settings, call = 
   if (item.status !== 'approved') throw Object.assign(new Error('Approve the card first.'), { status: 409 });
   if (!['pokemon', 'mtg'].includes(item.game)) throw Object.assign(new Error('Only Pokémon and Magic cards can be listed in this version.'), { status: 409 });
   if (!(Number(item.price) >= 0.99) || !item.title) throw Object.assign(new Error('The card needs a title and a price of at least $0.99.'), { status: 409 });
+  if (item.photo_crop) throw Object.assign(new Error('This card only has a binder-page photo. Replace it with a photo of the card itself first.'), { status: 409 });
   const { templates } = await loadTemplates(db, userId);
   await must(db.from('snap_items').update({ publish_state: 'checking', publish_error: null }).eq('id', item.id).eq('user_id', userId));
   try {

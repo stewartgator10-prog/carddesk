@@ -76,6 +76,7 @@ export const REVIEW_LABELS = {
   not_a_card: 'Not a trading card',
   other_game: 'Game not catalog-checked yet',
   non_english: 'Not English',
+  page_photo: 'Needs its own photo for eBay',
 };
 
 // Turns Claude's read + the catalog match into the queue row fields and review flags.

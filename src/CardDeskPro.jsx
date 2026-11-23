@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera, Receipt } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera, Receipt, HandCoins } from 'lucide-react';
 import EbaySalesTab from './EbaySalesTab.jsx';
 import ListingsTab from './ListingsTab.jsx';
 import { supabase, apiFetch } from './lib/supabase.js';
@@ -8,7 +8,9 @@ import RepricerTab from './pricing/RepricerTab.jsx';
 // Loaded only when the tab is opened, so phones don't download it up front.
 const SnapTab = lazy(() => import('./SnapTab.jsx'));
 const CostsTab = lazy(() => import('./CostsTab.jsx'));
+const BuyOffersTab = lazy(() => import('./BuyOffersTab.jsx'));
 import { SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
+import { OFFER_DEFAULTS } from '../netlify/lib/offer-logic.js';
 import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
 
 const DEFAULT_SETTINGS = {
@@ -20,6 +22,7 @@ const DEFAULT_SETTINGS = {
   sharpnessThreshold: 20,
   minProfitDollars: 5,
   ...SNAP_DEFAULTS, // Snap to List: model, markup, minimum, price ending, monthly AI budget
+  ...OFFER_DEFAULTS, // Buy offers: bulk cutoff and flat price, mid/high % of market
 };
 
 const GAMES = ['Pokémon', 'MTG'];
@@ -451,6 +454,7 @@ export default function CardDeskPro({ session }) {
       <nav className="app-pad" style={{ borderBottom: '1px solid #2a2a36', padding: '0 32px', display: 'flex', gap: 0, overflowX: 'auto' }}>
         <button className={`tab-btn ${tab === 'analyzer' ? 'active' : ''}`} onClick={() => setTab('analyzer')}><Target size={16} /> Deal Analyzer</button>
         <button className={`tab-btn ${tab === 'snap' ? 'active' : ''}`} onClick={() => setTab('snap')}><Camera size={16} /> Snap to List</button>
+        <button className={`tab-btn ${tab === 'offers' ? 'active' : ''}`} onClick={() => setTab('offers')}><HandCoins size={16} /> Buy Offers</button>
         <button className={`tab-btn ${tab === 'livesearch' ? 'active' : ''}`} onClick={() => setTab('livesearch')}><Zap size={16} /> Live eBay Search</button>
         <button className={`tab-btn ${tab === 'scanner' ? 'active' : ''}`} onClick={() => setTab('scanner')}><Search size={16} /> Bulk Scanner</button>
         <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
@@ -789,6 +793,11 @@ export default function CardDeskPro({ session }) {
           </div>
         )}
         {tab === 'ebaysales' && <EbaySalesTab />}
+        {tab === 'offers' && (
+          <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
+            <BuyOffersTab userId={userId} settings={settings} setSettings={setSettings} onGoToSnap={() => setTab('snap')} />
+          </Suspense>
+        )}
         {tab === 'costs' && (
           <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
             <CostsTab settings={settings} />

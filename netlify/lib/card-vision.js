@@ -54,17 +54,17 @@ export function getClient() {
   return client;
 }
 
-export function buildRequest(model, image) {
+export function buildRequest(model, image, { schema = CardRead, system = SYSTEM_PROMPT, prompt = 'Identify this card.' } = {}) {
   const params = {
     model,
     max_tokens: 8000,
-    output_config: { effort: 'low', format: betaZodOutputFormat(CardRead) },
-    system: SYSTEM_PROMPT,
+    output_config: { effort: 'low', format: betaZodOutputFormat(schema) },
+    system,
     messages: [{
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } },
-        { type: 'text', text: 'Identify this card.' },
+        { type: 'text', text: prompt },
       ],
     }],
   };
@@ -79,10 +79,10 @@ export function buildRequest(model, image) {
 }
 
 // The answer is the JSON text block; validate it against the same schema the request sent.
-export function parseCardRead(msg) {
+export function parseCardRead(msg, schema = CardRead) {
   const text = (msg.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
   try {
-    const out = CardRead.safeParse(JSON.parse(text));
+    const out = schema.safeParse(JSON.parse(text));
     return out.success ? out.data : null;
   } catch {
     return null;
@@ -116,4 +116,37 @@ export async function fetchImage(url, fetchImpl = fetch) {
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length > 5 * 1024 * 1024) throw new Error('Photo is over 5 MB');
   return { base64: buf.toString('base64'), mediaType };
+}
+
+// ---------- several cards in one photo (binder page or a spread), for buy offers ----------
+export const PAGE_PROMPT = `${SYSTEM_PROMPT}
+
+This photo may show several cards: a binder page or cards laid out on a table. Return every trading card you can see, at most 9, in reading order (left to right, then top to bottom) with position starting at 1. For each card give box: where the card is in the photo as fractions of the photo's width and height (x, y = top-left corner; w, h = width and height), each between 0 and 1. If a card's small print can't be read, still return it with your best name and a low confidence.`;
+
+export const PageRead = z.object({
+  cards: z.array(CardRead.extend({
+    position: z.number().int(),
+    box: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
+  })),
+});
+
+const clamp01 = (n) => Math.min(1, Math.max(0, Number(n) || 0));
+export const cleanBox = (b) => {
+  const x = clamp01(b?.x), y = clamp01(b?.y);
+  return { x, y, w: Math.min(clamp01(b?.w), 1 - x), h: Math.min(clamp01(b?.h), 1 - y) };
+};
+
+export async function readPage({ model, image, anthropic = null }) {
+  if (!SNAP_MODELS.includes(model)) throw new Error(`Unsupported model ${model}`);
+  const api = anthropic || getClient();
+  const t0 = Date.now();
+  const req = buildRequest(model, image, { schema: PageRead, system: PAGE_PROMPT, prompt: 'Identify every card in this photo.' });
+  const { data: msg, request_id } = await api.beta.messages.create(req).withResponse();
+  const base = { usage: msg.usage, servedModel: msg.model || model, requestId: request_id, latencyMs: Date.now() - t0 };
+  if (msg.stop_reason === 'refusal') throw Object.assign(new Error('Claude declined to read this photo.'), base);
+  if (msg.stop_reason === 'max_tokens') throw Object.assign(new Error('Claude ran out of room before finishing.'), base);
+  const page = parseCardRead(msg, PageRead);
+  if (!page) throw Object.assign(new Error('Claude returned an unreadable answer.'), base);
+  const cards = page.cards.slice(0, 9).map((c, i) => ({ ...c, position: i + 1, box: cleanBox(c.box) }));
+  return { cards, ...base };
 }
