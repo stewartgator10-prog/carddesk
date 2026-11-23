@@ -782,6 +782,12 @@ function ListingSetup({ s, set }) {
         <div><label htmlFor="ship-cutoff">Parcel from $</label><input id="ship-cutoff" className="bg-input" type="number" step="1" min="0" value={s.snapShipCutoff} onChange={(e) => set('snapShipCutoff', e.target.value === '' ? 20 : Number(e.target.value))} /></div>
         <div className="ink-faint" style={{ fontSize: '0.7rem', alignSelf: 'end' }}>Cards priced under this use your envelope shipping policy; at or above it, your parcel policy.</div>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+        {[['pkg-oz', 'Weight (oz)', 'snapPackageWeightOz', 3], ['pkg-l', 'Length (in)', 'snapPackageLengthIn', 9], ['pkg-w', 'Width (in)', 'snapPackageWidthIn', 6], ['pkg-d', 'Depth (in)', 'snapPackageDepthIn', 1]].map(([id, label, key, d]) => (
+          <div key={id}><label htmlFor={id}>{label}</label><input id={id} className="bg-input" type="number" step="0.5" min="0" value={s[key] ?? d} onChange={(e) => set(key, e.target.value === '' ? d : Number(e.target.value))} /></div>
+        ))}
+        <div className="ink-faint" style={{ gridColumn: '1 / -1', fontSize: '0.7rem' }}>The package each card ships in. eBay needs it to work out calculated shipping. Check the card again after changing it.</div>
+      </div>
       <div><label htmlFor="desc-footer">Note added to every description (optional)</label>
         <textarea id="desc-footer" className="bg-input" rows={3} value={s.snapDescriptionFooter || ''} placeholder="e.g. Ships in a penny sleeve and top loader within 3 business days." onChange={(e) => set('snapDescriptionFooter', e.target.value)} /></div>
     </div>

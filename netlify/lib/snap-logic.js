@@ -10,6 +10,11 @@ export const SNAP_DEFAULTS = {
   aiMonthlyBudget: 25,    // USD of estimated Claude spend per calendar month; 0 = no limit
   snapShipCutoff: 20,     // list price under this uses the envelope shipping policy, at or over it the parcel one
   snapDescriptionFooter: '', // seller's own note added to every listing description (packaging, shipping...)
+  // The package every card ships in. Calculated shipping policies need its weight and size.
+  snapPackageWeightOz: 3,
+  snapPackageLengthIn: 9,
+  snapPackageWidthIn: 6,
+  snapPackageDepthIn: 1,
 };
 
 export const CONFIDENCE_OK = 0.8;

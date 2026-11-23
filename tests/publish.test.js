@@ -278,3 +278,11 @@ test('a listing can carry several photos: main first, extras in order, capped, a
   await assert.rejects(checkSnapItem({ db: foreign, userId: U, token: 't', item: foreign.tables.snap_items[0], settings: {}, fetchImpl, call: async () => verifyOk }), /does not belong to you/);
   assert.equal(uploaded.length, 4);
 });
+
+test('every listing carries the shipping package: 3 oz, 9 x 6 x 1 in by default, or the seller\'s own numbers', async () => {
+  const { packageXml } = await import('../netlify/lib/ebay-listing.js');
+  const xml = buildItemXml({ item: card(), templates, settings: {}, pictureUrls: ['https://i.ebayimg.com/a.jpg'] });
+  assert.match(xml, /<ShippingPackageDetails><MeasurementUnit>English<\/MeasurementUnit><PackageDepth unit="in">1<\/PackageDepth><PackageLength unit="in">9<\/PackageLength><PackageWidth unit="in">6<\/PackageWidth><ShippingPackage>PackageThickEnvelope<\/ShippingPackage><WeightMajor unit="lbs">0<\/WeightMajor><WeightMinor unit="oz">3<\/WeightMinor><\/ShippingPackageDetails>/);
+  assert.match(packageXml({ snapPackageWeightOz: 20, snapPackageLengthIn: 10, snapPackageWidthIn: 7.5, snapPackageDepthIn: 2 }), /<PackageDepth unit="in">2<.*<PackageLength unit="in">10<.*<PackageWidth unit="in">8<.*<WeightMajor unit="lbs">1<\/WeightMajor><WeightMinor unit="oz">4</);
+  assert.match(packageXml({ snapPackageWeightOz: 'x' }), /<WeightMinor unit="oz">3</);
+});
