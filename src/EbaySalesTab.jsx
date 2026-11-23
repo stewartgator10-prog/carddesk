@@ -12,9 +12,9 @@ const RANGES = [
 const N = (v) => (v == null ? null : Number(v));
 const fmt = (n) => (n == null || isNaN(n) ? '—' : `${n < 0 ? '-' : ''}$${Math.abs(Number(n)).toFixed(2)}`);
 const FEE_BADGE = {
-  actual: { text: 'ACTUAL', color: '#4ade80', tip: 'Fees from your eBay payouts' },
-  order: { text: 'ORDER', color: '#fbbf24', tip: 'Fee eBay showed on the order; payout not posted yet' },
-  estimated: { text: 'EST', color: '#f87171', tip: 'Estimated from your fee settings' },
+  actual: { text: 'ACTUAL', color: 'var(--good)', tip: 'Fees from your eBay payouts' },
+  order: { text: 'ORDER', color: 'var(--warn)', tip: 'Fee eBay showed on the order; payout not posted yet' },
+  estimated: { text: 'EST', color: 'var(--bad)', tip: 'Estimated from your fee settings' },
 };
 const MATCH_LABEL = { auto: 'Auto-matched', confirmed: 'Confirmed', suggested: 'Suggested', unmatched: 'No match', ignored: 'Not tracked' };
 
@@ -113,7 +113,7 @@ export default function EbaySalesTab() {
         <div style={{ display: 'flex', gap: 6 }}>
           {RANGES.map((r) => (
             <button key={r.key} className="btn-ghost" onClick={() => setRange(r.key)}
-              style={{ padding: '8px 12px', fontSize: '0.75rem', borderColor: range === r.key ? '#ff4d4d' : undefined, color: range === r.key ? '#ff4d4d' : undefined }}>{r.label}</button>
+              style={{ padding: '8px 12px', fontSize: '0.75rem', borderColor: range === r.key ? 'var(--active)' : undefined, color: range === r.key ? 'var(--active)' : undefined }}>{r.label}</button>
           ))}
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -125,7 +125,7 @@ export default function EbaySalesTab() {
         </div>
       </div>
 
-      {msg && <div style={{ padding: '10px 14px', marginBottom: 16, border: `1px solid ${msg.type === 'error' ? '#f87171' : '#4ade80'}`, color: msg.type === 'error' ? '#f87171' : '#4ade80', fontSize: '0.8rem' }}>{msg.text}</div>}
+      {msg && <div style={{ padding: '10px 14px', marginBottom: 16, border: `1px solid ${msg.type === 'error' ? 'var(--bad)' : 'var(--good)'}`, color: msg.type === 'error' ? 'var(--bad)' : 'var(--good)', fontSize: '0.8rem' }}>{msg.text}</div>}
 
       <div className="responsive-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 16 }}>
         <Stat label="GROSS SALES" value={fmt(s.gross)} sub={`${s.orders} orders · item + shipping, no tax`} />
@@ -136,8 +136,8 @@ export default function EbaySalesTab() {
       </div>
 
       {toReview.length > 0 && (
-        <div className="bg-card" style={{ padding: 0, marginBottom: 16, borderColor: '#fbbf24' }}>
-          <div style={{ padding: '14px 24px', borderBottom: '1px solid #2a2a36' }}>
+        <div className="bg-card" style={{ padding: 0, marginBottom: 16, borderColor: 'var(--warn)' }}>
+          <div style={{ padding: '14px 24px', borderBottom: '1px solid var(--line)' }}>
             <h2 className="display-font" style={{ fontSize: '1.2rem', margin: 0 }}>MATCH TO INVENTORY · {toReview.length}</h2>
             <div className="ink-dim" style={{ fontSize: '0.75rem' }}>These sales couldn't be matched by eBay item ID or SKU. Pick the card you sold so profit uses its cost.</div>
           </div>
@@ -163,11 +163,11 @@ export default function EbaySalesTab() {
       )}
 
       <div className="bg-card" style={{ padding: 0 }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36' }}><h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>EBAY SALES · {rows.length}</h2></div>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)' }}><h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>EBAY SALES · {rows.length}</h2></div>
         {loading ? <div style={{ padding: 48, textAlign: 'center' }} className="ink-faint"><Loader size={16} className="spin" /></div>
           : rows.length === 0 ? <div style={{ padding: 48, textAlign: 'center' }} className="ink-faint">No eBay sales in this range yet. Click Sync eBay sales.</div> : (
           <div className="scrollable">
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 90px 80px 80px 80px 90px 80px 90px 110px', gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', borderBottom: '1px solid #1f1f2a' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 90px 80px 80px 80px 90px 80px 90px 110px', gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)' }}>
               <div>Sale</div><div style={{ textAlign: 'right' }}>Gross</div><div style={{ textAlign: 'right' }}>Fees</div><div style={{ textAlign: 'right' }}>Label</div><div style={{ textAlign: 'right' }}>Ads/Ref.</div><div style={{ textAlign: 'right' }}>Net</div><div style={{ textAlign: 'right' }}>Cost</div><div style={{ textAlign: 'right' }}>Profit</div><div>Inventory</div>
             </div>
             {rows.map((r) => {
@@ -181,7 +181,7 @@ export default function EbaySalesTab() {
                   <div style={{ textAlign: 'right' }}>{fmt(r.shipping_label)}</div>
                   <div style={{ textAlign: 'right' }}>{fmt(r.ad_fees + r.refunds + r.other)}</div>
                   <div style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(r.net_payout)}</div>
-                  <div style={{ textAlign: 'right' }}>{fmt(r.cost_basis)}{r.cost_estimated && r.cost_basis != null && <div style={{ fontSize: '0.6rem', color: '#fbbf24' }} title="Estimated cost">est.</div>}</div>
+                  <div style={{ textAlign: 'right' }}>{fmt(r.cost_basis)}{r.cost_estimated && r.cost_basis != null && <div style={{ fontSize: '0.6rem', color: 'var(--warn)' }} title="Estimated cost">est.</div>}</div>
                   <div style={{ textAlign: 'right', fontWeight: 600 }} className={r.profit == null ? 'ink-faint' : r.profit >= 0 ? 'accent-green' : 'accent-red'}>{fmt(r.profit)}</div>
                   <div style={{ fontSize: '0.7rem' }}>
                     <div className="ink-dim">{MATCH_LABEL[r.match_status]}</div>

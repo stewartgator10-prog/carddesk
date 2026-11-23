@@ -4,7 +4,7 @@ import { supabase, apiFetch } from './lib/supabase.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
 
 const money = (n) => (n == null || n === '' || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(2)}`);
-const SOURCE = { entered: ['typed', '#8a8a96'], purchase: ['purchase', '#60a5fa'], estimated: ['est.', '#fbbf24'] };
+const SOURCE = { entered: ['typed', 'var(--ink-dim)'], purchase: ['purchase', 'var(--info)'], estimated: ['est.', 'var(--warn)'] };
 
 async function costsApi(body) {
   const res = body
@@ -21,7 +21,7 @@ function Progress({ label, done, total, estimated }) {
     <div className="stat-box">
       <div className="ink-faint" style={{ fontSize: '0.7rem', letterSpacing: '0.12em' }}>{label}</div>
       <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{done} <span className="ink-dim" style={{ fontSize: '0.9rem' }}>of {total}</span></div>
-      <div style={{ height: 4, background: '#2a2a36', marginTop: 6 }}><div style={{ height: 4, width: `${pct * 100}%`, background: pct === 1 ? '#4ade80' : '#fbbf24' }} /></div>
+      <div style={{ height: 4, background: 'var(--line)', marginTop: 6 }}><div style={{ height: 4, width: `${pct * 100}%`, background: pct === 1 ? 'var(--good)' : 'var(--warn)' }} /></div>
       <div className="ink-dim" style={{ fontSize: '0.7rem', marginTop: 4 }}>have a cost{estimated ? ` · ${estimated} estimated` : ''}</div>
     </div>
   );
@@ -109,7 +109,7 @@ export default function CostsTab({ settings }) {
   if (loading) return <div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>;
 
   const pill = (k, label) => (
-    <button className="btn-ghost" onClick={() => setPanel(k)} style={{ padding: '8px 12px', fontSize: '0.75rem', borderColor: panel === k ? '#ff4d4d' : undefined, color: panel === k ? '#ff4d4d' : undefined }}>{label}</button>
+    <button className="btn-ghost" onClick={() => setPanel(k)} style={{ padding: '8px 12px', fontSize: '0.75rem', borderColor: panel === k ? 'var(--active)' : undefined, color: panel === k ? 'var(--active)' : undefined }}>{label}</button>
   );
 
   return (
@@ -122,11 +122,11 @@ export default function CostsTab({ settings }) {
           <div className="ink-dim" style={{ fontSize: '0.7rem', marginTop: 4 }}>{money((summary?.purchases || []).reduce((t, p) => t + Number(p.total_paid), 0))} spent</div></div>
       </div>
 
-      {msg && <div style={{ padding: '10px 14px', border: `1px solid ${msg.type === 'error' ? '#f87171' : '#4ade80'}`, color: msg.type === 'error' ? '#f87171' : '#4ade80', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between' }}>
+      {msg && <div style={{ padding: '10px 14px', border: `1px solid ${msg.type === 'error' ? 'var(--bad)' : 'var(--good)'}`, color: msg.type === 'error' ? 'var(--bad)' : 'var(--good)', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between' }}>
         <span>{msg.text}</span><button className="btn-icon" onClick={() => setMsg(null)}><X size={14} /></button></div>}
 
       {activeListings > 0 && listingCards < activeListings && (
-        <section className="bg-card" style={{ padding: 16, borderColor: '#fbbf24', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <section className="bg-card" style={{ padding: 16, borderColor: 'var(--warn)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 260px', fontSize: '0.85rem' }}>
             <strong>{activeListings} eBay listings</strong> aren't in inventory yet. Import them so each sale can show real profit and the Repricer can use your costs.
           </div>
@@ -145,7 +145,7 @@ export default function CostsTab({ settings }) {
 
       {panel === 'stock' && (
         <section className="bg-card" style={{ padding: 0 }}>
-          <div style={{ padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid #2a2a36' }}>
+          <div style={{ padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid var(--line)' }}>
             <input className="bg-input" placeholder="Search cards" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: '1 1 160px', padding: '8px 10px' }} />
             <select className="bg-input" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 150, padding: '8px 10px' }}>
               <option value="missing">Missing cost</option><option value="estimated">Estimated</option><option value="all">All</option>
@@ -167,7 +167,7 @@ export default function CostsTab({ settings }) {
             </div>
           ) : (
             <div className="scrollable">
-              <div className="grid-row" style={{ gridTemplateColumns: '22px 36px minmax(0, 1fr) 54px 80px 54px', gap: 6, padding: '8px 10px', fontSize: '0.65rem', letterSpacing: '0.08em', color: '#8a8a96' }}>
+              <div className="grid-row" style={{ gridTemplateColumns: '22px 36px minmax(0, 1fr) 54px 80px 54px', gap: 6, padding: '8px 10px', fontSize: '0.65rem', letterSpacing: '0.08em', color: 'var(--ink-dim)' }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={allVisibleSelected} onChange={(e) => setSelected(e.target.checked ? new Set([...selected, ...visibleStock.map((r) => r.id)]) : new Set())} />
                 <div></div><div>CARD</div><div style={{ textAlign: 'right' }}>PRICE</div><div>COST (Enter = next)</div><div style={{ textAlign: 'right' }}>PROFIT</div>
               </div>
@@ -190,7 +190,7 @@ export default function CostsTab({ settings }) {
               })}
             </div>
           )}
-          <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '10px 14px', borderTop: '1px solid #1f1f2a' }}>
+          <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '10px 14px', borderTop: '1px solid var(--line-soft)' }}>
             Profit = list price after your eBay fee settings and default shipping, minus cost. A purchase splits what you paid (cards + shipping + tax) across its cards by market value.
           </div>
         </section>
@@ -198,7 +198,7 @@ export default function CostsTab({ settings }) {
 
       {panel === 'sales' && (
         <section className="bg-card" style={{ padding: 0 }}>
-          <div style={{ padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid #2a2a36', fontSize: '0.75rem' }}>
+          <div style={{ padding: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', borderBottom: '1px solid var(--line)', fontSize: '0.75rem' }}>
             <span className="ink-dim" style={{ flex: '1 1 240px' }}>Enter what you paid for each card you sold. Each one becomes a sold inventory record linked to the sale.</span>
             <span className="ink-faint">Estimate the rest at</span>
             <input className="bg-input" type="number" value={pct} onChange={(e) => setPct(e.target.value)} style={{ width: 56, padding: '6px' }} /><span className="ink-faint">% of sale</span>
@@ -207,14 +207,14 @@ export default function CostsTab({ settings }) {
           </div>
           {sales.length === 0 ? <div className="ink-faint" style={{ padding: 40, textAlign: 'center' }}>No eBay sales synced yet. Sync them on the eBay Sales tab.</div> : (
             <div className="scrollable">
-              <div className="grid-row" style={{ gridTemplateColumns: 'minmax(0, 1fr) 54px 54px 80px 54px', gap: 6, padding: '8px 10px', fontSize: '0.65rem', letterSpacing: '0.08em', color: '#8a8a96' }}>
+              <div className="grid-row" style={{ gridTemplateColumns: 'minmax(0, 1fr) 54px 54px 80px 54px', gap: 6, padding: '8px 10px', fontSize: '0.65rem', letterSpacing: '0.08em', color: 'var(--ink-dim)' }}>
                 <div>SALE</div><div style={{ textAlign: 'right' }}>SOLD</div><div style={{ textAlign: 'right' }}>NET</div><div>COST</div><div style={{ textAlign: 'right' }}>PROFIT</div>
               </div>
               {sales.map((s) => (
                 <div key={s.line_item_id} className="grid-row" style={{ gridTemplateColumns: 'minmax(0, 1fr) 54px 54px 80px 54px', gap: 6, padding: '8px 10px' }}>
                   <div style={{ minWidth: 0, fontSize: '0.8rem' }}><div style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere' }} title={s.title}>{s.title}</div>
                     <span className="ink-faint" style={{ fontSize: '0.65rem' }}>{s.sold_at?.slice(0, 10)}</span>
-                    {s.cost_estimated && <span style={{ fontSize: '0.6rem', color: '#fbbf24' }}> · est.</span>}</div>
+                    {s.cost_estimated && <span style={{ fontSize: '0.6rem', color: 'var(--warn)' }}> · est.</span>}</div>
                   <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>{money(s.gross)}</div>
                   <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>{money(s.net_payout)}</div>
                   <CostInput rowKey={s.line_item_id} value={s.cost_basis} onSave={(cost) => run(null, { action: 'sale_cost', lineItemId: s.line_item_id, cost })} />
@@ -229,7 +229,7 @@ export default function CostsTab({ settings }) {
       {panel === 'purchases' && (
         <section className="bg-card" style={{ padding: 0 }}>
           {(summary?.purchases || []).length === 0
-            ? <div className="ink-faint" style={{ padding: 40, textAlign: 'center', fontSize: '0.85rem' }}>No purchases yet. On "Cards in stock", tick the cards from one order and press PURCHASE.</div>
+            ? <div className="ink-faint" style={{ padding: 40, textAlign: 'center', fontSize: '0.85rem' }}>No purchases yet. On "Cards in stock", tick the cards from one order and press "purchase for selected".</div>
             : (summary?.purchases || []).map((p) => {
               const n = stock.filter((r) => r.purchase_id === p.id).length;
               return (
@@ -264,7 +264,7 @@ function PurchaseModal({ cards, onClose, onSave, busy }) {
   const preview = useMemo(() => (Number(total) >= 0 && total !== ''
     ? splitCost(Number(total), cards.map((c) => ({ id: c.id, weight: c.price })), method) : null), [total, cards, method]);
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-card-raised" style={{ padding: 20, width: '100%', maxWidth: 520, maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}><h3 className="display-font" style={{ margin: 0, fontSize: '1.3rem' }}>PURCHASE · {cards.length} CARDS</h3><button className="btn-icon" onClick={onClose}><X size={16} /></button></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -273,7 +273,7 @@ function PurchaseModal({ cards, onClose, onSave, busy }) {
           <div><label htmlFor="pur-source">Bought from</label><input id="pur-source" className="bg-input" value={source} placeholder="e.g. eBay: seller123" onChange={(e) => setSource(e.target.value)} /></div>
           <div><label htmlFor="pur-split">Split</label><select id="pur-split" className="bg-input" value={method} onChange={(e) => setMethod(e.target.value)}><option value="market">By market value</option><option value="even">Evenly</option></select></div>
         </div>
-        <div className="scrollable" style={{ maxHeight: 260, border: '1px solid #2a2a36' }}>
+        <div className="scrollable" style={{ maxHeight: 260, border: '1px solid var(--line)' }}>
           {cards.map((c) => (
             <div key={c.id} className="grid-row" style={{ gridTemplateColumns: '1fr 70px 70px', fontSize: '0.75rem', padding: '6px 10px' }}>
               <div style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere' }}>{c.card_name}</div>

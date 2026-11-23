@@ -49,9 +49,9 @@ export default function BuyOffersTab({ userId, settings, setSettings, onGoToSnap
       {msg && <div className="accent-red" style={{ fontSize: '0.8rem' }}>{msg.text}</div>}
       <section className="bg-card" style={{ padding: 0 }}>
         {offers.length === 0 ? <div className="ink-faint" style={{ padding: 40, textAlign: 'center' }}>No offers yet.</div> : offers.map((o) => (
-          <button key={o.id} className="grid-row" onClick={() => setOpenId(o.id)} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 90px', width: '100%', background: 'none', border: 'none', borderBottom: '1px solid #1f1f2a', color: 'inherit', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}>
+          <button key={o.id} className="grid-row" onClick={() => setOpenId(o.id)} style={{ gridTemplateColumns: 'minmax(0,1fr) 90px 90px', width: '100%', background: 'none', border: 'none', borderBottom: '1px solid var(--line-soft)', color: 'inherit', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit' }}>
             <div>{o.name}<div className="ink-faint" style={{ fontSize: '0.65rem' }}>{new Date(o.created_at).toLocaleString()}</div></div>
-            <div style={{ fontSize: '0.7rem', color: o.status === 'accepted' ? '#4ade80' : o.status === 'declined' ? '#8a8a96' : '#fbbf24' }}>{o.status.toUpperCase()}</div>
+            <div style={{ fontSize: '0.7rem', color: o.status === 'accepted' ? 'var(--good)' : o.status === 'declined' ? 'var(--ink-dim)' : 'var(--warn)' }}>{o.status.toUpperCase()}</div>
             <div style={{ textAlign: 'right', fontWeight: 600 }}>{o.final_offer != null ? money(o.final_offer) : ''}</div>
           </button>
         ))}
@@ -136,7 +136,7 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button className="btn-ghost" onClick={onBack} style={{ padding: '6px 10px', display: 'inline-flex', gap: 4, alignItems: 'center' }}><ChevronLeft size={14} /> Offers</button>
         <h2 className="display-font" style={{ margin: 0, fontSize: '1.3rem', flex: 1 }}>{offer.name}</h2>
-        <span style={{ fontSize: '0.7rem', color: status === 'accepted' ? '#4ade80' : status === 'declined' ? '#8a8a96' : '#fbbf24' }}>{status.toUpperCase()}</span>
+        <span style={{ fontSize: '0.7rem', color: status === 'accepted' ? 'var(--good)' : status === 'declined' ? 'var(--ink-dim)' : 'var(--warn)' }}>{status.toUpperCase()}</span>
       </div>
 
       {!locked && (
@@ -144,14 +144,14 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
           <input ref={pageInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { addPhotos(e.target.files, 'page'); e.target.value = ''; }} />
           <input ref={singleInput} type="file" accept="image/*" capture="environment" multiple style={{ display: 'none' }} onChange={(e) => { addPhotos(e.target.files, 'single'); e.target.value = ''; }} />
           <button className="btn-primary" onClick={() => pageInput.current?.click()} style={{ padding: '12px 16px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Grid3x3 size={16} /> BINDER PAGE</button>
-          <button className="btn-ghost" onClick={() => singleInput.current?.click()} style={{ padding: '12px 16px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Camera size={16} /> SINGLE CARD</button>
+          <button className="btn-ghost" onClick={() => singleInput.current?.click()} style={{ padding: '12px 16px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Camera size={16} /> Single card</button>
           <span className="ink-dim" style={{ fontSize: '0.7rem', flex: '1 1 200px' }}>
             {busy ? <span className="accent-amber"><Loader size={12} className="spin" /> Reading {busy} photo{busy === 1 ? '' : 's'}…</span> : 'Binder page: up to 9 cards, flat and glare-free. Use single cards for anything valuable or unclear.'}
           </span>
         </section>
       )}
 
-      {msg && <div style={{ padding: '8px 12px', border: `1px solid ${msg.type === 'error' ? '#f87171' : '#4ade80'}`, color: msg.type === 'error' ? '#f87171' : '#4ade80', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+      {msg && <div style={{ padding: '8px 12px', border: `1px solid ${msg.type === 'error' ? 'var(--bad)' : 'var(--good)'}`, color: msg.type === 'error' ? 'var(--bad)' : 'var(--good)', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
         <span>{msg.text}{msg.type === 'ok' && onGoToSnap && <> <button className="btn-icon" style={{ color: 'inherit', textDecoration: 'underline', fontSize: 'inherit' }} onClick={onGoToSnap}>Open Snap to List</button></>}</span>
         <button className="btn-icon" onClick={() => setMsg(null)}><X size={14} /></button></div>}
 
@@ -170,7 +170,7 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
           {[['offerBulkUnder', 'Bulk under $'], ['offerBulkFlat', 'Bulk offer $ each'], ['offerMidPct', 'Mid % of market'], ['offerHighFrom', 'High from $'], ['offerHighPct', 'High % of market']].map(([k, l]) => (
             <div key={k}><label htmlFor={`t-${k}`}>{l}</label><input id={`t-${k}`} className="bg-input" type="number" step="0.01" min="0" value={tiers[k]} onChange={(e) => setTier(k, e.target.value === '' ? 0 : Number(e.target.value))} /></div>
           ))}
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center', textTransform: 'none', letterSpacing: 0, color: '#e8e8ed' }}><input type="checkbox" style={{ width: 'auto' }} checked={!!tiers.offerRoundTotal} onChange={(e) => setTier('offerRoundTotal', e.target.checked)} /> Round total down to $1</label>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', textTransform: 'none', letterSpacing: 0, color: 'var(--ink)' }}><input type="checkbox" style={{ width: 'auto' }} checked={!!tiers.offerRoundTotal} onChange={(e) => setTier('offerRoundTotal', e.target.checked)} /> Round total down to $1</label>
         </section>
       )}
 
@@ -187,7 +187,7 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
                   <div className="ink-faint" style={{ fontSize: '0.65rem', overflowWrap: 'anywhere' }}>{[it.catalog_set || it.set_name, it.catalog_number || it.collector_number, it.language !== 'English' ? it.language : null].filter(Boolean).join(' · ')}</div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2, alignItems: 'center' }}>
                     <select className="bg-input" aria-label="Condition" disabled={locked} value={it.condition || 'NM'} onChange={(e) => patch(it.id, { condition: e.target.value })} style={{ width: 62, padding: '2px 4px', fontSize: '0.7rem' }}>{CONDS.map((c) => <option key={c}>{c}</option>)}</select>
-                    {(it.flags || []).filter((f) => f !== 'ebay_median').map((f) => <span key={f} style={{ fontSize: '0.6rem', padding: '1px 4px', border: '1px solid #fbbf24', color: '#fbbf24' }}>{OFFER_FLAG_LABELS[f] || f}</span>)}
+                    {(it.flags || []).filter((f) => f !== 'ebay_median').map((f) => <span key={f} style={{ fontSize: '0.6rem', padding: '1px 4px', border: '1px solid var(--warn)', color: 'var(--warn)' }}>{OFFER_FLAG_LABELS[f] || f}</span>)}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
@@ -199,7 +199,7 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
                 <div style={{ textAlign: 'right' }}>
                   <input className="bg-input" aria-label="Offer" type="number" step="0.01" min="0" disabled={locked} value={it.offer_override ?? (o ?? '')} placeholder="offer"
                     onChange={(e) => setItems((xs) => xs.map((x) => (x.id === it.id ? { ...x, offer_override: e.target.value === '' ? null : e.target.value } : x)))}
-                    onBlur={(e) => patch(it.id, { offer_override: e.target.value === '' || Number(e.target.value) === offerOf({ ...it, offer_override: null }, tiers) ? null : Number(e.target.value) })} style={{ padding: '4px 6px', fontSize: '0.75rem', textAlign: 'right', color: '#4ade80' }} />
+                    onBlur={(e) => patch(it.id, { offer_override: e.target.value === '' || Number(e.target.value) === offerOf({ ...it, offer_override: null }, tiers) ? null : Number(e.target.value) })} style={{ padding: '4px 6px', fontSize: '0.75rem', textAlign: 'right', color: 'var(--good)' }} />
                   <div className="ink-faint" style={{ fontSize: '0.6rem' }}>{m ? `${Math.round(((o || 0) / m) * 100)}%` : ''}</div>
                 </div>
               </div>
@@ -209,14 +209,14 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
       )}
 
       {sheet && (
-        <div style={{ position: 'fixed', inset: 0, background: '#0a0a0f', zIndex: 60, overflowY: 'auto', padding: 16 }}>
-          <div style={{ maxWidth: 640, margin: '0 auto', display: 'grid', gap: 12 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--sheet)', zIndex: 60, overflowY: 'auto', padding: 16 }}>
+          <div className="bg-card" style={{ maxWidth: 640, margin: '0 auto', display: 'grid', gap: 12, padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 className="display-font" style={{ margin: 0, fontSize: '1.6rem' }}>OUR OFFER</h2>
               <button className="btn-ghost" onClick={() => setSheet(false)} style={{ padding: '6px 10px' }}>Back</button>
             </div>
             {items.filter((i) => i.included !== false).map((it) => (
-              <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '54px minmax(0,1fr) 72px 72px', gap: 8, alignItems: 'center', borderBottom: '1px solid #1f1f2a', paddingBottom: 8 }}>
+              <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '54px minmax(0,1fr) 72px 72px', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--line-soft)', paddingBottom: 8 }}>
                 <CropImg url={urls[it.photo_path]} box={it.source === 'page' ? it.box : null} alt={it.card_name} />
                 <div style={{ fontSize: '0.85rem', minWidth: 0 }}><div style={{ overflowWrap: 'anywhere' }}>{it.card_name}</div><div className="ink-faint" style={{ fontSize: '0.7rem' }}>{[it.catalog_set || it.set_name, it.catalog_number || it.collector_number, it.condition].filter(Boolean).join(' · ')}</div></div>
                 <div style={{ textAlign: 'right', fontSize: '0.8rem' }}><div className="ink-faint" style={{ fontSize: '0.6rem' }}>MARKET</div>{money(marketOf(it))}</div>
@@ -230,7 +230,7 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, alignItems: 'end' }}>
               <div><label htmlFor="final-offer">Agreed amount $ (if different)</label><input id="final-offer" className="bg-input" type="number" step="0.01" min="0" value={finalOffer} placeholder={totals.offer.toFixed(2)} onChange={(e) => setFinalOffer(e.target.value)} /></div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn-ghost" onClick={decline} style={{ flex: 1, padding: 12 }}>DECLINED</button>
+                <button className="btn-ghost" onClick={decline} style={{ flex: 1, padding: 12 }}>Declined</button>
                 <button className="btn-primary" onClick={accept} style={{ flex: 1, padding: 12, display: 'inline-flex', gap: 6, alignItems: 'center', justifyContent: 'center' }}><Check size={16} /> ACCEPTED</button>
               </div>
             </div>

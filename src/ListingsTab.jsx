@@ -120,12 +120,12 @@ export default function ListingsTab() {
 
   return (
     <div>
-      {notice && <div className="bg-card" style={{ padding: '12px 16px', marginBottom: 16, borderColor: '#4ade80' }}><span className="accent-green">{notice}</span></div>}
-      {error && <div className="bg-card" style={{ padding: '12px 16px', marginBottom: 16, borderColor: '#ff4d4d' }}><span className="accent-red">{error}</span></div>}
+      {notice && <div className="bg-card" style={{ padding: '12px 16px', marginBottom: 16, borderColor: 'var(--good)' }}><span className="accent-green">{notice}</span></div>}
+      {error && <div className="bg-card" style={{ padding: '12px 16px', marginBottom: 16, borderColor: 'var(--accent)' }}><span className="accent-red">{error}</span></div>}
 
       {!account ? (
         <section className="bg-card" style={{ padding: 32, textAlign: 'center' }}>
-          <Store size={32} style={{ color: '#ff4d4d' }} />
+          <Store size={32} style={{ color: 'var(--accent)' }} />
           <h2 className="display-font" style={{ fontSize: '1.5rem', margin: '12px 0 4px' }}>CONNECT YOUR EBAY STORE</h2>
           <p className="ink-dim" style={{ fontSize: '0.85rem', maxWidth: 520, margin: '0 auto 20px' }}>
             Sign in with eBay to pull your active listings into CardDesk. CardDesk only reads your listings for now; nothing on eBay changes.
@@ -133,7 +133,7 @@ export default function ListingsTab() {
           <button className="btn-primary" onClick={connect} disabled={!!busy} style={{ padding: '12px 24px', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             {busy === 'connect' ? <Loader size={16} className="spin" /> : <Link2 size={16} />} Connect eBay
           </button>
-          <div style={{ maxWidth: 560, margin: '28px auto 0', textAlign: 'left', borderTop: '1px solid #2a2a36', paddingTop: 20 }}>
+          <div style={{ maxWidth: 560, margin: '28px auto 0', textAlign: 'left', borderTop: '1px solid var(--line)', paddingTop: 20 }}>
             <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>Stuck on eBay's "Thank You" page?</div>
             <p className="ink-dim" style={{ fontSize: '0.8rem', marginTop: 0 }}>
               If eBay says "Authorization successfully completed" and doesn't bring you back, copy that page's full address from the browser bar and paste it here within 5 minutes.
@@ -156,7 +156,7 @@ export default function ListingsTab() {
           </div>
 
           <div className="bg-card" style={{ padding: 0 }}>
-            <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0, flex: 1 }}>EBAY LISTINGS · {visible.length}</h2>
               <input className="bg-input" placeholder="Search title, SKU, item #" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
               <label className="ink-dim" style={{ fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -174,7 +174,7 @@ export default function ListingsTab() {
               </div>
             ) : (
               <div className="scrollable">
-                <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', borderBottom: '1px solid #1f1f2a' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)' }}>
                   <div></div><div>Title · SKU</div><div style={{ textAlign: 'right' }}>Price</div><div>Format</div><div style={{ textAlign: 'right' }}>Avail.</div><div style={{ textAlign: 'right' }}>Watch</div><div>Listed</div><div></div>
                 </div>
                 {visible.map((l) => (

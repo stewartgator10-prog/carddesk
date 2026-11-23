@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { supabase, supabaseConfigured } from './lib/supabase.js';
+import { Hedge, Clouds } from './Scenery.jsx';
 
-const shell = {
-  minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-  background: 'linear-gradient(180deg, #0a0a0f 0%, #12121a 100%)', color: '#e8e8ed',
-  fontFamily: '"JetBrains Mono", "SF Mono", Menlo, monospace',
-};
-const card = { background: '#1c1c28', border: '1px solid #2a2a36', padding: 28, width: '100%', maxWidth: 380 };
-const input = { width: '100%', padding: '10px 12px', background: '#0e0e15', border: '1px solid #2a2a36', color: '#e8e8ed', fontFamily: 'inherit', fontSize: '0.875rem', boxSizing: 'border-box' };
-const labelStyle = { display: 'block', fontSize: '0.7rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#8a8a96', margin: '12px 0 6px' };
-const primary = { width: '100%', marginTop: 18, padding: '12px', background: '#ff4d4d', color: '#fff', border: 'none', cursor: 'pointer', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.08em', fontSize: '1rem' };
-const link = { background: 'none', border: 'none', color: '#8a8a96', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', padding: 0, textDecoration: 'underline' };
+const card = { padding: 28, width: '100%', maxWidth: 380 };
+const input = { width: '100%', padding: '10px 12px', fontSize: '0.9rem', boxSizing: 'border-box' };
+const labelStyle = { margin: '14px 0 6px' };
+const primary = { width: '100%', marginTop: 20, padding: '12px', fontSize: '1rem' };
+const link = { background: 'none', border: 'none', color: 'var(--ink-dim)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.8rem', padding: 0, textDecoration: 'underline' };
+
+// The sign-in screens share one calm scene: sky, drifting clouds and the hedge along the bottom.
+function Scene({ children }) {
+  return <div className="center-screen"><Clouds />{children}<Hedge sign={false} /></div>;
+}
 
 // Shows a sign-in screen until there is a Supabase session, then renders children(session).
 export default function AuthGate({ children }) {
@@ -29,13 +30,13 @@ export default function AuthGate({ children }) {
 
   if (!supabaseConfigured) {
     return (
-      <div style={shell}><div style={card}>
-        <h2 style={{ marginTop: 0, color: '#ff4d4d', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.06em' }}>SUPABASE NOT CONFIGURED</h2>
+      <Scene><div className="bg-card auth-card" style={card}>
+        <h2 className="display-font" style={{ marginTop: 0 }}>Supabase not configured</h2>
         <p style={{ fontSize: '0.85rem', lineHeight: 1.5 }}>Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Netlify (or a local <code>.env</code>) and rebuild.</p>
-      </div></div>
+      </div></Scene>
     );
   }
-  if (session === undefined) return <div style={shell}><span style={{ color: '#8a8a96' }}>Loading…</span></div>;
+  if (session === undefined) return <Scene><span className="quiet">Loading…</span></Scene>;
   if (!session) return <SignIn />;
   if (recovering) return <NewPassword onDone={() => setRecovering(false)} />;
   return children(session);
@@ -71,20 +72,20 @@ function SignIn() {
     }
   }
 
-  const title = mode === 'signin' ? 'SIGN IN' : mode === 'signup' ? 'CREATE ACCOUNT' : 'RESET PASSWORD';
+  const title = mode === 'signin' ? 'sign in' : mode === 'signup' ? 'create account' : 'reset password';
   return (
-    <div style={shell}>
-      <form onSubmit={submit} style={card}>
-        <h1 style={{ margin: 0, color: '#ff4d4d', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.04em', fontSize: '2rem' }}>CARDDESK</h1>
-        <div style={{ color: '#8a8a96', fontSize: '0.75rem', letterSpacing: '0.12em', marginBottom: 8 }}>{title}</div>
+    <Scene>
+      <form onSubmit={submit} className="bg-card" style={card}>
+        <h1 className="wordmark">Card<span>Desk</span></h1>
+        <div className="quiet" style={{ fontSize: '0.85rem', margin: '6px 0 8px' }}>{title}</div>
         <label style={labelStyle} htmlFor="email">Email</label>
-        <input id="email" style={input} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input id="email" className="bg-input" style={input} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         {mode !== 'reset' && (<>
           <label style={labelStyle} htmlFor="password">Password</label>
-          <input id="password" style={input} type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input id="password" className="bg-input" style={input} type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
         </>)}
-        <button type="submit" style={{ ...primary, opacity: busy ? 0.6 : 1 }} disabled={busy}>{busy ? 'WORKING…' : title}</button>
-        {msg && <div style={{ marginTop: 12, fontSize: '0.8rem', color: msg.ok ? '#4ade80' : '#ff6b6b' }}>{msg.text}</div>}
+        <button type="submit" className="btn-primary" style={primary} disabled={busy}>{busy ? 'working…' : title}</button>
+        {msg && <div style={{ marginTop: 12, fontSize: '0.8rem', color: msg.ok ? 'var(--good)' : 'var(--bad)' }}>{msg.text}</div>}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16 }}>
           {mode !== 'signin'
             ? <button type="button" style={link} onClick={() => { setMode('signin'); setMsg(null); }}>Back to sign in</button>
@@ -92,7 +93,7 @@ function SignIn() {
           {mode === 'signin' && <button type="button" style={link} onClick={() => { setMode('reset'); setMsg(null); }}>Forgot password?</button>}
         </div>
       </form>
-    </div>
+    </Scene>
   );
 }
 
@@ -108,15 +109,15 @@ function NewPassword({ onDone }) {
     if (error) setErr(error.message); else onDone();
   }
   return (
-    <div style={shell}>
-      <form onSubmit={submit} style={card}>
-        <h1 style={{ margin: 0, color: '#ff4d4d', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.04em', fontSize: '2rem' }}>CARDDESK</h1>
-        <div style={{ color: '#8a8a96', fontSize: '0.75rem', letterSpacing: '0.12em', marginBottom: 8 }}>SET A NEW PASSWORD</div>
+    <Scene>
+      <form onSubmit={submit} className="bg-card" style={card}>
+        <h1 className="wordmark">Card<span>Desk</span></h1>
+        <div className="quiet" style={{ fontSize: '0.85rem', margin: '6px 0 8px' }}>set a new password</div>
         <label style={labelStyle} htmlFor="newpw">New password</label>
-        <input id="newpw" style={input} type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
-        <button type="submit" style={{ ...primary, opacity: busy ? 0.6 : 1 }} disabled={busy}>{busy ? 'SAVING…' : 'SAVE PASSWORD'}</button>
-        {err && <div style={{ marginTop: 12, fontSize: '0.8rem', color: '#ff6b6b' }}>{err}</div>}
+        <input id="newpw" className="bg-input" style={input} type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+        <button type="submit" className="btn-primary" style={primary} disabled={busy}>{busy ? 'saving…' : 'save password'}</button>
+        {err && <div style={{ marginTop: 12, fontSize: '0.8rem', color: 'var(--bad)' }}>{err}</div>}
       </form>
-    </div>
+    </Scene>
   );
 }

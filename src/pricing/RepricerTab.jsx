@@ -171,7 +171,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       {state.demo && (
-        <div className="bg-card" style={{ padding: '12px 16px', borderColor: '#fbbf24', display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: '0.8rem' }}>
+        <div className="bg-card" style={{ padding: '12px 16px', borderColor: 'var(--warn)', display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: '0.8rem' }}>
           <AlertTriangle size={16} className="accent-amber" style={{ flexShrink: 0, marginTop: 2 }} />
           <div>
             <strong className="accent-amber">DEMO MODE.</strong> Your eBay seller account isn't connected yet, so these are sample listings and
@@ -190,7 +190,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
               <option value="cents">Exact cents</option><option value="charm">End in .99</option>
             </select>
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: '0.8rem', color: '#e8e8ed', marginBottom: 10, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: '0.8rem', color: 'var(--ink)', marginBottom: 10, cursor: 'pointer' }}>
             <input type="checkbox" checked={enforceFloor} onChange={e => setEnforceFloor(e.target.checked)} style={{ width: 'auto' }} />
             Never price below profit floor
           </label>
@@ -205,7 +205,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
           </button>
           <span className="ink-faint" style={{ fontSize: '0.7rem', marginBottom: 10 }}>{lastMarket ? `Market data ${new Date(lastMarket).toLocaleString()}` : 'No market data yet'}</span>
         </div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', borderTop: '1px solid #1f1f2a', paddingTop: 12 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', borderTop: '1px solid var(--line-soft)', paddingTop: 12 }}>
           <div className="ink-dim" style={{ fontSize: '0.75rem', marginBottom: 10 }}>BULK · {selectedCount} selected</div>
           <div style={{ width: 190 }}><label>Rule</label>
             <select className="bg-input" value={rule} onChange={e => { setRule(e.target.value); setAmount(['matchComps', 'matchMarket'].includes(e.target.value) ? '0' : e.target.value === 'undercut' ? '0.05' : ''); }}>
@@ -231,7 +231,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
 
       {/* Table */}
       <section className="bg-card" style={{ padding: 0 }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>ACTIVE LISTINGS · {state.listings.length}</h2>
           <button className="btn-primary" disabled={!pending.length} onClick={openReview} style={{ padding: '10px 18px' }}>
             REVIEW {pending.length} CHANGE{pending.length === 1 ? '' : 'S'} →
@@ -242,7 +242,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
         {state.listings.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <div style={{ minWidth: 900 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, padding: '12px 16px', fontSize: '0.7rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', borderBottom: '1px solid #1f1f2a', alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, padding: '12px 16px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)', alignItems: 'center' }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={selectedCount > 0 && selectedCount === visible.filter(r => r.editable).length} onChange={e => toggleAll(e.target.checked)} />
                 <div>Listing</div><div style={{ textAlign: 'right' }}>Current</div><div>Market · eBay low</div>
                 <div style={{ textAlign: 'right' }}>Floor</div><div>New price</div><div style={{ textAlign: 'right' }}>Change</div><div style={{ textAlign: 'right' }}>Net</div>
@@ -265,7 +265,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
             </div>
           </div>
         )}
-        <div className="ink-faint" style={{ padding: '12px 24px', fontSize: '0.7rem', borderTop: '1px solid #1f1f2a' }}>
+        <div className="ink-faint" style={{ padding: '12px 24px', fontSize: '0.7rem', borderTop: '1px solid var(--line-soft)' }}>
           mkt = TCGplayer market price for the exact card (English Pokémon and Magic). eBay = cheapest comparable Buy It Now from other sellers, price + their shipping
           (same card, number, language, graded or raw); hover for the listings. Both refresh nightly. sold = your <button className="btn-icon" style={{ padding: 0, textDecoration: 'underline', color: 'inherit', fontSize: 'inherit' }} onClick={onGoToComps}>Sold Comps</button> log. Floor = cost + min profit + shipping after eBay fees. Net = what you keep after fees and shipping, before cost.
         </div>
@@ -367,7 +367,7 @@ function LinkEditor({ listing, value, onSave, onClose }) {
   const [compKey, setCompKey] = useState(value.compKey || '');
   const [costBasis, setCostBasis] = useState(value.costBasis ?? '');
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
       <div className="bg-card-raised" style={{ padding: 24, maxWidth: 480, width: '100%' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <h3 className="display-font" style={{ margin: 0, fontSize: '1.3rem' }}>LINK COMPS & COST</h3>
@@ -390,7 +390,7 @@ function ReviewModal({ changes, demo, pushing, onConfirm, onClose }) {
   const totalDelta = changes.reduce((a, c) => a + (c.newPrice - c.oldPrice), 0);
   const flagged = changes.filter(c => c.warnings.length).length;
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
       <div className="bg-card-raised" style={{ padding: 24, maxWidth: 720, width: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 className="display-font" style={{ margin: 0, fontSize: '1.4rem' }}>REVIEW {changes.length} PRICE CHANGE{changes.length === 1 ? '' : 'S'}</h3>
@@ -405,7 +405,7 @@ function ReviewModal({ changes, demo, pushing, onConfirm, onClose }) {
             If a listing's Best Offer auto-decline or auto-accept amount blocks a lower price, CardDesk lowers it by the same % so your offer rules stay the same.
           </div>
         )}
-        <div className="scrollable" style={{ flex: 1, border: '1px solid #2a2a36' }}>
+        <div className="scrollable" style={{ flex: 1, border: '1px solid var(--line)' }}>
           {changes.map(c => (
             <div key={c.itemId} className="grid-row" style={{ gridTemplateColumns: '1fr 80px 20px 80px' }}>
               <div style={{ minWidth: 0 }}>
@@ -433,7 +433,7 @@ function ReviewModal({ changes, demo, pushing, onConfirm, onClose }) {
 function HistoryPanel({ history, onClear }) {
   return (
     <section className="bg-card" style={{ padding: 0 }}>
-      <div style={{ padding: '12px 24px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '12px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>PRICE CHANGE HISTORY</h3>
         {history.length > 0 && <button className="btn-ghost" onClick={onClear} style={{ padding: '6px 10px', fontSize: '0.75rem' }}>Clear</button>}
       </div>

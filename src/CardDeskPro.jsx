@@ -1,11 +1,26 @@
 import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera, Receipt, HandCoins } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera, Receipt, HandCoins, Settings } from 'lucide-react';
+import { Hedge, Clouds, useLivingTouches } from './Scenery.jsx';
 import EbaySalesTab from './EbaySalesTab.jsx';
 import ListingsTab from './ListingsTab.jsx';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, markLegacyLocalDataHandled } from './lib/store.js';
 import RepricerTab from './pricing/RepricerTab.jsx';
 // Loaded only when the tab is opened, so phones don't download it up front.
+const TABS = [
+  { id: 'analyzer', label: 'Deal Analyzer', Icon: Target },
+  { id: 'snap', label: 'Snap to List', Icon: Camera },
+  { id: 'offers', label: 'Buy Offers', Icon: HandCoins },
+  { id: 'livesearch', label: 'Live eBay Search', Icon: Zap },
+  { id: 'scanner', label: 'Bulk Scanner', Icon: Search },
+  { id: 'watchlist', label: 'Watchlist', Icon: Eye },
+  { id: 'comps', label: 'Sold Comps', Icon: BarChart3 },
+  { id: 'inventory', label: 'Inventory · P&L', Icon: Package },
+  { id: 'costs', label: 'Costs', Icon: Receipt },
+  { id: 'listings', label: 'eBay Listings', Icon: Store },
+  { id: 'repricer', label: 'Repricer', Icon: Tag },
+  { id: 'ebaysales', label: 'eBay Sales · Real P&L', Icon: DollarSign },
+];
 const SnapTab = lazy(() => import('./SnapTab.jsx'));
 const CostsTab = lazy(() => import('./CostsTab.jsx'));
 const BuyOffersTab = lazy(() => import('./BuyOffersTab.jsx'));
@@ -60,6 +75,7 @@ function computeMedian(arr) {
 
 export default function CardDeskPro({ session }) {
   const userId = session.user.id;
+  useLivingTouches();
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'analyzer');
   const [dataError, setDataError] = useState(null);
   const { settings, setSettings, loaded: settingsLoaded } = useSettings(userId, DEFAULT_SETTINGS, setDataError);
@@ -368,102 +384,58 @@ export default function CardDeskPro({ session }) {
   function dismissLegacyLocal() { markLegacyLocalDataHandled(); setLegacyLocal(null); }
 
   if (!dataLoaded && !dataError) {
-    return <div style={{ minHeight: '100vh', background: '#0a0a0f', color: '#8a8a96', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"JetBrains Mono", Menlo, monospace' }}>Loading your data…</div>;
+    return <div className="center-screen"><span className="quiet">Loading your data…</span><Hedge sign={false} /></div>;
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #0a0a0f 0%, #12121a 100%)', color: '#e8e8ed', fontFamily: '"JetBrains Mono", "SF Mono", Menlo, monospace' }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Bebas+Neue&display=swap');
-        * { box-sizing: border-box; }
-        .display-font { font-family: "Bebas Neue", sans-serif; letter-spacing: 0.04em; }
-        .ink-dim { color: #8a8a96; } .ink-faint { color: #5a5a66; }
-        .accent-red { color: #ff4d4d; } .accent-green { color: #4ade80; } .accent-amber { color: #fbbf24; }
-        .bg-card { background: #16161f; border: 1px solid #2a2a36; }
-        .bg-card-raised { background: #1c1c28; border: 1px solid #2a2a36; }
-        .bg-input { background: #0e0e15; border: 1px solid #2a2a36; color: #e8e8ed; }
-        .bg-input:focus { outline: none; border-color: #ff4d4d; }
-        .btn-primary { background: #ff4d4d; color: #fff; border: none; cursor: pointer; font-family: "Bebas Neue", sans-serif; letter-spacing: 0.08em; font-size: 0.95rem; transition: all 0.15s; }
-        .btn-primary:hover { background: #ff6666; }
-        .btn-primary:disabled { background: #3a3a46; color: #6a6a76; cursor: not-allowed; }
-        .btn-ghost { background: transparent; border: 1px solid #2a2a36; color: #e8e8ed; cursor: pointer; transition: all 0.15s; font-family: inherit; }
-        .btn-ghost:hover { border-color: #ff4d4d; color: #ff4d4d; }
-        .btn-icon { background: transparent; border: none; color: #8a8a96; cursor: pointer; padding: 4px; }
-        .btn-icon:hover { color: #ff4d4d; }
-        .tab-btn { background: transparent; border: none; border-bottom: 2px solid transparent; color: #8a8a96; cursor: pointer; padding: 16px 20px; font-family: "Bebas Neue", sans-serif; letter-spacing: 0.1em; font-size: 1.05rem; transition: all 0.2s; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-        .tab-btn:hover { color: #e8e8ed; }
-        .tab-btn.active { color: #ff4d4d; border-bottom-color: #ff4d4d; }
-        .sharp-strong { background: rgba(239, 68, 68, 0.12); border-color: #ff4d4d; color: #ff6b6b; }
-        .sharp-good { background: rgba(74, 222, 128, 0.08); border-color: #4ade80; color: #4ade80; }
-        .fair { background: rgba(251, 191, 36, 0.08); border-color: #fbbf24; color: #fbbf24; }
-        .at-market { background: rgba(138, 138, 150, 0.08); border-color: #5a5a66; color: #8a8a96; }
-        .overpriced { background: rgba(138, 138, 150, 0.05); border-color: #3a3a46; color: #6a6a76; }
-        .grid-row { display: grid; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid #1f1f2a; font-size: 0.875rem; }
-        .grid-row:hover { background: rgba(255, 255, 255, 0.015); }
-        .stat-box { padding: 20px; background: #16161f; border: 1px solid #2a2a36; position: relative; overflow: hidden; }
-        .stat-box::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, #ff4d4d, transparent); }
-        input, select, textarea { width: 100%; padding: 10px 12px; font-family: inherit; font-size: 0.875rem; border-radius: 0; }
-        label { display: block; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: #8a8a96; margin-bottom: 6px; }
-        .pulse-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; display: inline-block; animation: pulse 2s infinite; }
-        @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.3 } }
-        .scrollable { max-height: 600px; overflow-y: auto; }
-        .scrollable::-webkit-scrollbar { width: 6px; }
-        .scrollable::-webkit-scrollbar-track { background: #0a0a0f; }
-        .scrollable::-webkit-scrollbar-thumb { background: #2a2a36; }
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        @media (max-width: 768px) { .responsive-grid { grid-template-columns: 1fr !important; } .tab-btn { padding: 12px 14px; font-size: 0.9rem; } .app-pad { padding-left: 16px !important; padding-right: 16px !important; } main.app-pad { padding-top: 16px !important; } }
-      `}</style>
+    <div className="app-shell">
 
-      <header className="app-pad" style={{ borderBottom: '1px solid #2a2a36', padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-            <h1 className="display-font" style={{ fontSize: '2rem', margin: 0, color: '#ff4d4d' }}>CARDDESK</h1>
-            <span className="ink-dim" style={{ fontSize: '0.7rem', letterSpacing: '0.15em' }}>RESELLER TERMINAL · v2.0 · LIVE</span>
+      <div className="sky">
+        <Clouds />
+        <header className="app-pad" style={{ padding: '22px 32px 14px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div className="sky-text">
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+              <h1 className="wordmark">Card<span>Desk</span></h1>
+              <span className="quiet" style={{ fontSize: '0.8rem' }}>buy, list and sell, at an easy pace</span>
+            </div>
+            <div className="ink-dim" style={{ fontSize: '0.78rem', fontWeight: 600, marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <span><span className="pulse-dot"></span> {watchlist.length} watched</span>
+              <span>{inventory.filter(i => i.status === 'In Stock').length} in stock</span>
+              <span>{comps.length} comps logged</span>
+            </div>
           </div>
-          <div className="ink-faint" style={{ fontSize: '0.7rem', marginTop: 4, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span><span className="pulse-dot"></span> {watchlist.length} watched</span>
-            <span>{inventory.filter(i => i.status === 'In Stock').length} in stock</span>
-            <span>{comps.length} comps logged</span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn-ghost" onClick={exportData} style={{ padding: '8px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Download size={14} /> Backup</button>
+            <label className="btn-ghost" style={{ padding: '8px 12px', fontSize: '0.8rem', fontWeight: 400, letterSpacing: 0, margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--ink)' }}>
+              <Upload size={14} /> Import backup<input type="file" accept=".json" onChange={importData} style={{ display: 'none' }} />
+            </label>
+            <button className="btn-ghost" onClick={() => setShowSettings(true)} style={{ padding: '8px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Settings size={14} /> Settings</button>
+            <button className="btn-ghost" onClick={() => supabase.auth.signOut()} title={`Signed in as ${session.user.email}`} style={{ padding: '8px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><LogOut size={14} /> Sign out</button>
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn-ghost" onClick={exportData} style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Download size={14} /> Backup</button>
-          <label className="btn-ghost" style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-            <Upload size={14} /> Import Backup<input type="file" accept=".json" onChange={importData} style={{ display: 'none' }} />
-          </label>
-          <button className="btn-ghost" onClick={() => setShowSettings(true)} style={{ padding: '10px 16px' }}>⚙ Settings</button>
-          <button className="btn-ghost" onClick={() => supabase.auth.signOut()} title={`Signed in as ${session.user.email}`} style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><LogOut size={14} /> Sign out</button>
-        </div>
-      </header>
+        </header>
+        <Hedge number={Math.max(1, TABS.findIndex((t) => t.id === tab) + 1)} />
+      </div>
 
       {legacyLocal && (
-        <div className="app-pad" style={{ padding: '12px 32px', background: 'rgba(251, 191, 36, 0.08)', borderBottom: '1px solid #fbbf24', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem' }}>
+        <div className="app-pad" style={{ padding: '12px 32px', background: 'var(--warn-wash)', borderBottom: '1px solid var(--warn)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem' }}>
           <span className="accent-amber">This browser still has {legacyLocal.total} items from the old CardDesk (before accounts). Copy them into your account?</span>
           <button className="btn-primary" onClick={importLegacyLocal} style={{ padding: '6px 14px' }}>Import them</button>
           <button className="btn-ghost" onClick={dismissLegacyLocal} style={{ padding: '6px 12px', fontSize: '0.75rem' }}>Not now, don't ask again</button>
         </div>
       )}
       {(importMsg || dataError) && (
-        <div className="app-pad" style={{ padding: '10px 32px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: '0.8rem' }}>
+        <div className="app-pad" style={{ padding: '10px 32px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: '0.8rem' }}>
           <span className={dataError || (importMsg && !importMsg.ok) ? 'accent-red' : 'accent-green'}>{dataError || importMsg.text}</span>
           <button className="btn-icon" onClick={() => { setImportMsg(null); setDataError(null); }}><X size={14} /></button>
         </div>
       )}
 
-      <nav className="app-pad" style={{ borderBottom: '1px solid #2a2a36', padding: '0 32px', display: 'flex', gap: 0, overflowX: 'auto' }}>
-        <button className={`tab-btn ${tab === 'analyzer' ? 'active' : ''}`} onClick={() => setTab('analyzer')}><Target size={16} /> Deal Analyzer</button>
-        <button className={`tab-btn ${tab === 'snap' ? 'active' : ''}`} onClick={() => setTab('snap')}><Camera size={16} /> Snap to List</button>
-        <button className={`tab-btn ${tab === 'offers' ? 'active' : ''}`} onClick={() => setTab('offers')}><HandCoins size={16} /> Buy Offers</button>
-        <button className={`tab-btn ${tab === 'livesearch' ? 'active' : ''}`} onClick={() => setTab('livesearch')}><Zap size={16} /> Live eBay Search</button>
-        <button className={`tab-btn ${tab === 'scanner' ? 'active' : ''}`} onClick={() => setTab('scanner')}><Search size={16} /> Bulk Scanner</button>
-        <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
-        <button className={`tab-btn ${tab === 'comps' ? 'active' : ''}`} onClick={() => setTab('comps')}><BarChart3 size={16} /> Sold Comps</button>
-        <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}><Package size={16} /> Inventory · P&L</button>
-        <button className={`tab-btn ${tab === 'costs' ? 'active' : ''}`} onClick={() => setTab('costs')}><Receipt size={16} /> Costs</button>
-        <button className={`tab-btn ${tab === 'listings' ? 'active' : ''}`} onClick={() => setTab('listings')}><Store size={16} /> eBay Listings</button>
-        <button className={`tab-btn ${tab === 'repricer' ? 'active' : ''}`} onClick={() => setTab('repricer')}><Tag size={16} /> Repricer</button>
-        <button className={`tab-btn ${tab === 'ebaysales' ? 'active' : ''}`} onClick={() => setTab('ebaysales')}><DollarSign size={16} /> eBay Sales · Real P&L</button>
+      <nav className="trail app-pad" style={{ paddingLeft: 32, paddingRight: 32 }} aria-label="Sections">
+        {TABS.map(({ id, label, Icon }) => (
+          <button key={id} className={`tab-btn ${tab === id ? 'active' : ''}`} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
+            <span className="hex"><Icon size={13} strokeWidth={2.4} /></span>{label}
+          </button>
+        ))}
       </nav>
 
       <main className="app-pad" style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
@@ -479,7 +451,7 @@ export default function CardDeskPro({ session }) {
               <p className="ink-dim" style={{ marginTop: 0, fontSize: '0.8rem' }}>Paste an eBay or TCGplayer URL to auto-fill, or enter manually below.</p>
 
               {/* URL PASTE */}
-              <div style={{ background: '#0e0e15', padding: 12, border: '1px solid #2a2a36', marginBottom: 16 }}>
+              <div style={{ background: 'var(--field)', padding: 12, border: '1px solid var(--line)', marginBottom: 16 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Link2 size={12} /> Paste Listing URL</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input className="bg-input" placeholder="https://www.ebay.com/itm/..." value={pasteUrl} onChange={e => setPasteUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleUrlPaste()} />
@@ -488,7 +460,7 @@ export default function CardDeskPro({ session }) {
                   </button>
                 </div>
                 {pasteMsg && (
-                  <div style={{ marginTop: 8, padding: 8, fontSize: '0.75rem', background: pasteMsg.type === 'error' ? 'rgba(255,77,77,0.1)' : 'rgba(74,222,128,0.08)', borderLeft: `3px solid ${pasteMsg.type === 'error' ? '#ff4d4d' : '#4ade80'}` }}>
+                  <div style={{ marginTop: 8, padding: 8, fontSize: '0.75rem', background: pasteMsg.type === 'error' ? 'var(--accent-wash)' : 'var(--good-wash)', borderLeft: `3px solid ${pasteMsg.type === 'error' ? 'var(--accent)' : 'var(--good)'}` }}>
                     {pasteMsg.text}
                   </div>
                 )}
@@ -519,7 +491,7 @@ export default function CardDeskPro({ session }) {
                 <div className={`bg-card ${analyzerResult.sharpness.tier}`} style={{ padding: 24, borderWidth: 2 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                     <h2 className="display-font" style={{ fontSize: '1.5rem', margin: 0 }}>VERDICT</h2>
-                    {analyzerResult.passesFilters && (<div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: '#ff4d4d' }}><Flame size={14} /> PASSES FILTERS</div>)}
+                    {analyzerResult.passesFilters && (<div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--accent)' }}><Flame size={14} /> PASSES FILTERS</div>)}
                   </div>
                   <div style={{ fontSize: '3rem', fontWeight: 700, lineHeight: 1, marginBottom: 4 }}>{analyzerResult.sharpness.emoji} {fmtPct(analyzerResult.sharpness.discount)}</div>
                   <div className="display-font" style={{ fontSize: '1.4rem', marginBottom: 24 }}>{analyzerResult.sharpness.label.toUpperCase()} — vs. FMV</div>
@@ -529,7 +501,7 @@ export default function CardDeskPro({ session }) {
                     <div><div className="ink-faint" style={{ fontSize: '0.7rem', letterSpacing: '0.12em' }}>PROFIT</div><div style={{ fontSize: '1.4rem', fontWeight: 600 }} className={analyzerResult.profit >= 0 ? 'accent-green' : 'accent-red'}>{fmt(analyzerResult.profit)}</div></div>
                     <div><div className="ink-faint" style={{ fontSize: '0.7rem', letterSpacing: '0.12em' }}>MARGIN</div><div style={{ fontSize: '1.4rem', fontWeight: 600 }} className={analyzerResult.marginPct >= 0 ? 'accent-green' : 'accent-red'}>{fmtPct(analyzerResult.marginPct)}</div></div>
                   </div>
-                  <div style={{ padding: 12, background: 'rgba(0,0,0,0.3)', fontSize: '0.8rem', borderLeft: '3px solid #ff4d4d' }}>
+                  <div style={{ padding: 12, background: 'var(--well)', fontSize: '0.8rem', borderLeft: '3px solid var(--accent)' }}>
                     {analyzerResult.sharpness.tier === 'sharp-strong' && '🔥 Rare opportunity. Act fast if condition checks out. Verify seller and photos before clicking buy.'}
                     {analyzerResult.sharpness.tier === 'sharp-good' && '✅ Solid margin after fees. This is the kind of deal that pays the bills.'}
                     {analyzerResult.sharpness.tier === 'fair' && '🟡 Marginal. Only worth it if liquidity is high or you have a buyer lined up.'}
@@ -544,7 +516,7 @@ export default function CardDeskPro({ session }) {
                 </div>
               )}
               <div className="bg-card" style={{ padding: 16, marginTop: 16 }}>
-                <h3 style={{ margin: 0, fontSize: '0.85rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', marginBottom: 12 }}>FMV Lookup Links</h3>
+                <h3 style={{ margin: 0, fontSize: '0.85rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', marginBottom: 12 }}>FMV Lookup Links</h3>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {aCardName ? (
                     <>
@@ -581,7 +553,7 @@ export default function CardDeskPro({ session }) {
               </div>
 
               {searchError && (
-                <div style={{ marginTop: 16, padding: 12, background: 'rgba(255,77,77,0.08)', borderLeft: '3px solid #ff4d4d', fontSize: '0.8rem' }}>
+                <div style={{ marginTop: 16, padding: 12, background: 'var(--accent-wash)', borderLeft: '3px solid var(--accent)', fontSize: '0.8rem' }}>
                   <strong className="accent-red">Error:</strong> {searchError}
                   <div className="ink-dim" style={{ fontSize: '0.7rem', marginTop: 4 }}>If this is a 401/auth error, check that EBAY_APP_ID and EBAY_CERT_ID are set in your Netlify environment variables.</div>
                 </div>
@@ -590,7 +562,7 @@ export default function CardDeskPro({ session }) {
 
             {searchResults && (
               <div className="bg-card" style={{ padding: 0, marginTop: 16 }}>
-                <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                   <h3 className="display-font" style={{ fontSize: '1.2rem', margin: 0 }}>RESULTS · {searchResults.length} ITEMS</h3>
                   {searchFmvNum > 0 && (<div className="ink-dim" style={{ fontSize: '0.75rem' }}>Scored vs. FMV {fmt(searchFmvNum)} · threshold {settings.sharpnessThreshold}%</div>)}
                 </div>
@@ -601,8 +573,8 @@ export default function CardDeskPro({ session }) {
                     const totalPrice = item.price + (item.shippingCost || 0);
                     const sharpness = searchFmvNum > 0 ? getSharpness(totalPrice, searchFmvNum) : null;
                     return (
-                      <div key={item.id || idx} style={{ padding: 16, borderBottom: '1px solid #1f1f2a', display: 'grid', gridTemplateColumns: '60px 1fr auto', gap: 16, alignItems: 'center' }}>
-                        {item.image ? <img src={item.image} alt="" style={{ width: 60, height: 60, objectFit: 'contain', background: '#0a0a0f' }} /> : <div style={{ width: 60, height: 60, background: '#0a0a0f' }} />}
+                      <div key={item.id || idx} style={{ padding: 16, borderBottom: '1px solid var(--line-soft)', display: 'grid', gridTemplateColumns: '60px 1fr auto', gap: 16, alignItems: 'center' }}>
+                        {item.image ? <img src={item.image} alt="" style={{ width: 60, height: 60, objectFit: 'contain', background: 'var(--well)' }} /> : <div style={{ width: 60, height: 60, background: 'var(--well)' }} />}
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: '0.85rem', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{item.title}</div>
                           <div style={{ fontSize: '0.7rem', display: 'flex', gap: 12, flexWrap: 'wrap' }} className="ink-dim">
@@ -614,7 +586,7 @@ export default function CardDeskPro({ session }) {
                         <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
                           {sharpness && (<span className={sharpness.tier} style={{ padding: '4px 10px', fontSize: '0.7rem', border: '1px solid', display: 'inline-block' }}>{sharpness.emoji} {fmtPct(sharpness.discount)}</span>)}
                           <div style={{ display: 'flex', gap: 4 }}>
-                            <button className="btn-ghost" onClick={() => sendResultToAnalyzer(item)} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>ANALYZE</button>
+                            <button className="btn-ghost" onClick={() => sendResultToAnalyzer(item)} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>Analyze</button>
                             <a className="btn-ghost" href={item.url} target="_blank" rel="noreferrer" style={{ padding: '4px 8px', fontSize: '0.7rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}><ExternalLink size={12} /></a>
                           </div>
                         </div>
@@ -641,7 +613,7 @@ export default function CardDeskPro({ session }) {
             </div>
             {pasteResults && (
               <div className="bg-card" style={{ padding: 0, marginTop: 16 }}>
-                <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 className="display-font" style={{ fontSize: '1.2rem', margin: 0 }}>SCAN RESULTS</h3>
                   <div style={{ fontSize: '0.75rem' }} className="ink-dim">{pasteResults.filter(r => r.passes).length} flagged · {pasteResults.filter(r => r.match).length} matched</div>
                 </div>
@@ -667,7 +639,7 @@ export default function CardDeskPro({ session }) {
         {/* ============ WATCHLIST ============ */}
         {tab === 'watchlist' && (
           <div className="bg-card" style={{ padding: 0 }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #2a2a36' }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--line)' }}>
               <h2 className="display-font" style={{ fontSize: '1.5rem', margin: 0 }}><Eye size={20} style={{ display: 'inline', marginRight: 8, verticalAlign: 'middle' }} /> WATCHLIST · {watchlist.length} CARDS</h2>
               <p className="ink-dim" style={{ marginTop: 4, marginBottom: 0, fontSize: '0.8rem' }}>Max-buy auto-set to FMV minus your {settings.sharpnessThreshold}% threshold.</p>
             </div>
@@ -675,7 +647,7 @@ export default function CardDeskPro({ session }) {
               <div style={{ padding: 48, textAlign: 'center' }} className="ink-faint">No cards on watchlist yet. Add from the Deal Analyzer.</div>
             ) : (
               <div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 120px 100px 90px 100px 100px 80px 40px', gap: 12, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', borderBottom: '1px solid #1f1f2a' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 120px 100px 90px 100px 100px 80px 40px', gap: 12, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)' }}>
                   <div>Card</div><div>Game · Set</div><div>Cond.</div><div style={{ textAlign: 'right' }}>FMV</div><div style={{ textAlign: 'right' }}>Max Buy</div><div>Liquidity</div><div>Added</div><div></div>
                 </div>
                 {watchlist.map(w => (
@@ -717,10 +689,10 @@ export default function CardDeskPro({ session }) {
               </div>
             </section>
             <section className="bg-card" style={{ padding: 0 }}>
-              <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36' }}><h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>SOLD COMPS · {comps.length}</h2></div>
+              <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)' }}><h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>SOLD COMPS · {comps.length}</h2></div>
               {comps.length === 0 ? <div style={{ padding: 48, textAlign: 'center' }} className="ink-faint">No comps logged.</div> : (
                 <div className="scrollable">
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 80px 80px 80px 80px 90px 40px', gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', borderBottom: '1px solid #1f1f2a' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 80px 80px 80px 80px 90px 40px', gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)' }}>
                     <div>Card / Set</div><div>Cond.</div><div style={{ textAlign: 'right' }}>Price</div><div>Source</div><div>Date</div><div>Game</div><div></div>
                   </div>
                   {comps.map(c => (
@@ -758,10 +730,10 @@ export default function CardDeskPro({ session }) {
               <div className="stat-box"><div className="ink-faint" style={{ fontSize: '0.7rem', letterSpacing: '0.12em' }}>AVG MARGIN · HOLD</div><div style={{ fontSize: '1.6rem', fontWeight: 700, marginTop: 4 }} className={pnl.avgMargin >= 0 ? 'accent-green' : 'accent-red'}>{fmtPct(pnl.avgMargin)}</div><div className="ink-dim" style={{ fontSize: '0.7rem', marginTop: 2 }}>{Math.round(pnl.avgHold)} days avg</div></div>
             </div>
             <div className="bg-card" style={{ padding: 0 }}>
-              <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36' }}><h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>INVENTORY · {inventory.length} ITEMS</h2></div>
+              <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)' }}><h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>INVENTORY · {inventory.length} ITEMS</h2></div>
               {inventory.length === 0 ? <div style={{ padding: 48, textAlign: 'center' }} className="ink-faint">Inventory empty. Add items from Analyzer.</div> : (
                 <div className="scrollable">
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 80px 90px 90px 90px 100px 110px 40px', gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', borderBottom: '1px solid #1f1f2a' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 80px 90px 90px 90px 100px 110px 40px', gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)' }}>
                     <div>Card · Set</div><div>Cond.</div><div>Status</div><div style={{ textAlign: 'right' }}>Cost</div><div style={{ textAlign: 'right' }}>FMV/Sale</div><div style={{ textAlign: 'right' }}>P&L</div><div>Acquired</div><div></div><div></div>
                   </div>
                   {inventory.map(i => {
@@ -777,12 +749,12 @@ export default function CardDeskPro({ session }) {
                       <div key={i.id} className="grid-row" style={{ gridTemplateColumns: '2fr 100px 80px 90px 90px 90px 100px 110px 40px' }}>
                         <div><div style={{ fontWeight: 500 }}>{i.cardName}</div><div className="ink-faint" style={{ fontSize: '0.7rem' }}>{i.game} · {i.set}</div></div>
                         <div style={{ fontSize: '0.8rem' }}>{i.condition}</div>
-                        <div><span style={{ padding: '3px 8px', fontSize: '0.7rem', border: '1px solid', color: i.status === 'Sold' ? '#4ade80' : '#fbbf24', borderColor: i.status === 'Sold' ? '#4ade80' : '#fbbf24' }}>{i.status.toUpperCase()}</span></div>
-                        <div style={{ textAlign: 'right' }}>{fmt(cb)}{i.costSource === 'estimated' && <div style={{ fontSize: '0.6rem', color: '#fbbf24' }}>est.</div>}</div>
+                        <div><span style={{ padding: '3px 8px', fontSize: '0.7rem', border: '1px solid', color: i.status === 'Sold' ? 'var(--good)' : 'var(--warn)', borderColor: i.status === 'Sold' ? 'var(--good)' : 'var(--warn)' }}>{i.status.toUpperCase()}</span></div>
+                        <div style={{ textAlign: 'right' }}>{fmt(cb)}{i.costSource === 'estimated' && <div style={{ fontSize: '0.6rem', color: 'var(--warn)' }}>est.</div>}</div>
                         <div style={{ textAlign: 'right' }}>{fmt(currentVal)}</div>
                         <div style={{ textAlign: 'right' }} className={pl >= 0 ? 'accent-green' : 'accent-red'}><div style={{ fontWeight: 600 }}>{fmt(pl)}</div><div style={{ fontSize: '0.7rem' }}>{fmtPct(plPct)}</div></div>
                         <div className="ink-dim" style={{ fontSize: '0.75rem' }}>{i.acquired}</div>
-                        <div>{i.status === 'In Stock' && (<button className="btn-ghost" onClick={() => { setSellingId(i.id); setSellPrice(i.currentFmv || ''); }} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>SOLD?</button>)}</div>
+                        <div>{i.status === 'In Stock' && (<button className="btn-ghost" onClick={() => { setSellingId(i.id); setSellPrice(i.currentFmv || ''); }} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>Sold?</button>)}</div>
                         <div><button className="btn-icon" onClick={() => removeInv(i.id)}><Trash2 size={14} /></button></div>
                       </div>
                     );
@@ -809,9 +781,10 @@ export default function CardDeskPro({ session }) {
           </Suspense>
         )}
       </main>
+      <footer className="page-foot quiet">CardDesk, noon.</footer>
 
       {sellingId && (
-        <div onClick={() => setSellingId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+        <div onClick={() => setSellingId(null)} style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
           <div onClick={e => e.stopPropagation()} className="bg-card-raised" style={{ padding: 24, width: 400 }}>
             <h3 className="display-font" style={{ marginTop: 0, fontSize: '1.3rem' }}>MARK AS SOLD</h3>
             <div style={{ display: 'grid', gap: 12 }}>
@@ -828,7 +801,7 @@ export default function CardDeskPro({ session }) {
       )}
 
       {showSettings && (
-        <div onClick={() => setShowSettings(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
+        <div onClick={() => setShowSettings(false)} style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }}>
           <div onClick={e => e.stopPropagation()} className="bg-card-raised" style={{ padding: 28, width: 500, maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 className="display-font" style={{ margin: 0, fontSize: '1.4rem' }}>SETTINGS · FEE PROFILE</h3>
