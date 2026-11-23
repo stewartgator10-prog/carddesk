@@ -4,18 +4,17 @@
 import crypto from 'node:crypto';
 import { readCard, readPage } from './card-vision.js';
 import { lookupCard } from './card-catalog.js';
-import { browseSearch } from './ebay-browse.js';
-import { filterCompetitors, summarizeComps, compQuery } from './market.js';
+import { ebayMedianFor } from './market.js';
 import { usageRow, logUsage, checkBudget } from './ai-usage.js';
 import { loadSnapSettings, BudgetError } from './snap-identify.js';
 import { splitCost } from './cost-split.js';
-import { applyIdentification, suggestPrice, buildTitle, CONFIDENCE_OK } from './snap-logic.js';
+import { applyIdentification, suggestPrice, buildTitle, CONFIDENCE_OK, CATALOG_GAMES } from './snap-logic.js';
 import { tiersFrom, marketOf, offerTotals } from './offer-logic.js';
 
 async function must(p) { const { data, error } = await p; if (error) throw new Error(error.message); return data; }
 const fail = (message, status = 409) => Object.assign(new Error(message), { status });
 
-// Market value for one read card: TCGplayer (catalog) for English Pokémon/Magic, otherwise the
+// Market value for one read card: TCGplayer (catalog) for English cards of the catalog games, otherwise the
 // median of comparable eBay Buy It Now listings. Returns the item fields to store.
 export async function valueCard(read, { ownSeller = null, deps = {} } = {}) {
   const flags = [];
@@ -25,19 +24,16 @@ export async function valueCard(read, { ownSeller = null, deps = {} } = {}) {
   let catalog = null;
   let market = null;
   let source = null;
-  if (read.is_trading_card && ['pokemon', 'mtg'].includes(read.game) && /^english$/i.test(read.language || 'English')) {
+  if (read.is_trading_card && CATALOG_GAMES.includes(read.game) && /^english$/i.test(read.language || 'English')) {
     catalog = await (deps.lookupCard || lookupCard)(read).catch(() => null);
+    if (catalog?.versions > 1) flags.push('multiple_versions');
     if (catalog?.matchLevel === 'name') flags.push('name_only_match');
     else if (catalog?.marketPrice != null) { market = catalog.marketPrice; source = 'tcgplayer'; }
   }
   // Slabs aren't priced from raw-card listings (the grade isn't known here); Jackson prices them by hand.
   if (market == null && read.is_trading_card && read.card_name && !read.graded) {
-    try {
-      const raw = { ...read, graded: false, grader: null, grade: null };
-      const res = await (deps.browseSearch || browseSearch)({ q: compQuery(raw), limit: 50, fixedPriceOnly: true });
-      const s = summarizeComps(filterCompetitors(res.items, raw, ownSeller));
-      if (s.comp_median != null) { market = s.comp_median; source = 'ebay_median'; flags.push('ebay_median'); }
-    } catch { /* no eBay data: left unpriced */ }
+    const median = await ebayMedianFor(read, { ownSeller, deps }).catch(() => null); // no eBay data: left unpriced
+    if (median != null) { market = median; source = 'ebay_median'; flags.push('ebay_median'); }
   }
   if (market == null) flags.push('no_price');
   return {
@@ -114,7 +110,7 @@ export async function acceptOffer({ db, userId, offerId, finalOffer = null }) {
   for (const it of items) {
     const read = { ...(it.extraction || {}), card_name: it.card_name, set_name: it.set_name, collector_number: it.collector_number, finish: it.finish, condition_guess: it.condition, graded: it.graded, confidence: it.confidence ?? it.extraction?.confidence ?? 0 };
     const market = marketOf(it);
-    const catalog = it.catalog_source ? { source: it.catalog_source, id: it.catalog_id, name: it.catalog_name, setName: it.catalog_set, number: it.catalog_number, imageUrl: it.catalog_image_url, marketPrice: market, matchLevel: (it.flags || []).includes('name_only_match') ? 'name' : 'exact' } : null;
+    const catalog = it.catalog_source ? { versions: (it.flags || []).includes('multiple_versions') ? 2 : 1, source: it.catalog_source, id: it.catalog_id, name: it.catalog_name, setName: it.catalog_set, number: it.catalog_number, imageUrl: it.catalog_image_url, marketPrice: market, matchLevel: (it.flags || []).includes('name_only_match') ? 'name' : 'exact' } : null;
     const snap = applyIdentification({ read, catalog, settings });
     if (!catalog && market != null) {
       // Priced from eBay listings (e.g. Japanese cards) or by hand: carry that value into the listing price.

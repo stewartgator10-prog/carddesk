@@ -18,6 +18,8 @@ export const CardRead = z.object({
   language: z.string(),
   finish: z.enum(['normal', 'holo', 'reverse_holo', 'foil', 'unknown']),
   variant: z.string().nullable(),
+  rarity: z.string().nullable(),
+  game_name: z.string().nullable(),
   graded: z.boolean(),
   condition_guess: z.enum(['NM', 'LP', 'MP', 'HP', 'DMG', 'unknown']),
   possible_misprint: z.boolean(),
@@ -32,6 +34,12 @@ Report only what you can read or clearly see. Never invent a value: use null whe
 - card_name: the name exactly as printed, including suffixes such as "ex", "V", "VMAX", "GX" and prefixes such as "Hisuian" or "Radiant".
 - collector_number: exactly as printed, keeping leading zeros and the set total, for example "035/193", "TG05/TG30", "SWSH050" or "216". Pokémon prints it bottom left or bottom right; Magic prints it bottom left above the set code.
 - set_code: the printed set code if there is one (Magic: three or four letters bottom left such as "SPM" or "W17"; Pokémon: the small regulation/set code if legible). set_name only if you are sure which set it is.
+- game: "yugioh" for Yu-Gi-Oh!, "one_piece" for the One Piece Card Game, "lorcana" for Disney Lorcana, "sports" for sports cards, "other" for any other card game.
+- game_name: only when game is "other": the game's name as printed or as you recognise it, for example "Digimon Card Game", "Dragon Ball Super Card Game", "Flesh and Blood", "Weiss Schwarz". Otherwise null.
+- Yu-Gi-Oh!: collector_number is the set code printed under the right side of the artwork, for example "LOB-EN001" or "RA01-EN008"; set_code is the part before the dash. Put "1st Edition" or "Limited Edition" in variant when it is printed under the left side of the artwork.
+- One Piece: collector_number is the card number printed bottom right, for example "OP01-001", "ST01-001", "EB01-006" or "P-001". Put "Alternate Art", "Manga", "SP" or "Treasure Cup" in variant when the artwork or foil is not the standard version.
+- Lorcana: card_name is the name and the version line joined with " - ", for example "Elsa - Snow Queen". collector_number is the number printed bottom left, for example "53/204", and set_code is the set number or code printed after the language there, for example "9". Use finish "foil" for a foil card and put "Enchanted" in variant for an Enchanted card.
+- rarity: as printed or as the foil shows it, otherwise null. Yu-Gi-Oh!: "Common", "Rare" (silver name), "Super Rare" (foil artwork), "Ultra Rare" (gold foil name and foil artwork), "Secret Rare", "Quarter Century Secret Rare" and so on. One Piece: the printed letters such as "C", "UC", "R", "SR", "SEC", "L". Lorcana: the symbol's name such as "Common", "Rare", "Super Rare", "Legendary", "Enchanted".
 - language: the card's language in English, for example "English" or "Japanese".
 - finish: "reverse_holo" when the foil pattern covers the card body but not the artwork; "holo" when the artwork itself is foil; "foil" for a foil Magic card; "normal" when nothing is foil; "unknown" when the photo can't show it.
 - variant: printed variations that change value, for example "Poke Ball Pattern", "Master Ball Pattern", "Borderless", "Showcase", "Extended Art", "1st Edition", "Shadowless", "Promo". Otherwise null.

@@ -3,7 +3,7 @@ import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, Flask
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import CropImg from './lib/CropImg.jsx';
-import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths } from '../netlify/lib/snap-logic.js';
+import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
 
@@ -13,7 +13,7 @@ const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const OPEN = ['uploaded', 'identifying', 'ready', 'needs_review', 'failed', 'approved', 'listed'];
 const DONE = ['approved', 'listed'];
 // Editing any of these after the eBay check means the check no longer describes the listing.
-const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths'];
+const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 const STATUS = {
@@ -353,13 +353,13 @@ function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetr
         <span className="ink-faint">{it.model ? (MODEL_LABELS[it.model] || it.model) : ''}{it.confidence != null ? ` · ${Math.round(it.confidence * 100)}% sure` : ''}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-        <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 0, overflow: 'hidden' }}>
           {photo ? (it.photo_crop ? <CropImg url={photo} box={it.photo_crop} alt="Your photo (from a binder page)" /> : <img src={photo} alt="Your photo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />) : <Loader size={14} className="spin ink-faint" />}
         </div>
-        <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+        <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', minWidth: 0, overflow: 'hidden' }}>
           {it.catalog_image_url
             ? <img src={it.catalog_image_url} alt="Catalog match" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            : <span className="ink-faint" style={{ fontSize: '0.7rem', textAlign: 'center', padding: 8 }}>{busy ? '' : 'No catalog match'}</span>}
+            : <span className="ink-faint" style={{ fontSize: '0.7rem', textAlign: 'center', padding: 8 }}>{busy ? '' : it.catalog_source ? <>Matched in the catalog, no picture:<br />{[it.catalog_set, it.catalog_number, it.rarity].filter(Boolean).join(' · ')}</> : 'No catalog match'}</span>}
           {it.catalog_source && <span style={{ position: 'absolute', bottom: 2, right: 4, fontSize: '0.6rem' }} className="ink-faint">{it.catalog_source}</span>}
         </div>
       </div>
@@ -422,6 +422,14 @@ function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetr
           <input className="bg-input" style={inp} value={d.card_name || ''} placeholder="Card name" onChange={(e) => field('card_name', e.target.value)} onBlur={() => commit({ card_name: d.card_name })} />
           <input className="bg-input" style={inp} value={d.catalog_number || d.collector_number || ''} placeholder="Number" onChange={(e) => field('catalog_number', e.target.value)} onBlur={() => commit({ catalog_number: d.catalog_number })} />
           <input className="bg-input" style={{ ...inp, gridColumn: 'span 2' }} value={d.catalog_set || d.set_name || ''} placeholder="Set" onChange={(e) => field('catalog_set', e.target.value)} onBlur={() => commit({ catalog_set: d.catalog_set })} />
+          <select className="bg-input" style={{ ...inp, gridColumn: ['pokemon', 'mtg'].includes(d.game) ? 'span 2' : undefined }} aria-label="Game" value={d.game || 'pokemon'} onChange={(e) => { field('game', e.target.value); commit({ game: e.target.value }); }}>
+            {Object.entries(GAME_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          {!['pokemon', 'mtg'].includes(d.game) && <input className="bg-input" style={inp} value={d.rarity || ''} placeholder="Rarity" aria-label="Rarity" onChange={(e) => field('rarity', e.target.value)} onBlur={() => commit({ rarity: d.rarity || null })} />}
+          {d.game === 'other' && (
+            <input className="bg-input" style={{ ...inp, gridColumn: 'span 2' }} value={d.extraction?.game_name || ''} placeholder="Game name, e.g. Digimon Card Game" aria-label="Game name"
+              onChange={(e) => field('extraction', { ...(d.extraction || {}), game_name: e.target.value })} onBlur={() => commit({ extraction: d.extraction })} />
+          )}
           <select className="bg-input" style={inp} value={d.finish || 'unknown'} onChange={(e) => { field('finish', e.target.value); commit({ finish: e.target.value }); }}>{FINISHES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           <select className="bg-input" style={inp} value={d.condition || 'NM'} onChange={(e) => { field('condition', e.target.value); commit({ condition: e.target.value }); }}>{CONDS.map((c) => <option key={c}>{c}</option>)}</select>
           <div style={{ gridColumn: 'span 2', display: 'flex', gap: 4 }}>
@@ -561,7 +569,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
     const res = await apiFetch('/api/snap-trial?n=30');
     const plan = await res.json().catch(() => ({}));
     if (!res.ok) { setErr(plan.error || `Couldn't start (${res.status})`); return; }
-    if (!plan.items?.length) { setErr('No Pokémon or Magic single listings with photos to test on. Sync your eBay listings first.'); return; }
+    if (!plan.items?.length) { setErr('No single-card listings with photos to test on. Sync your eBay listings first.'); return; }
     const est = plan.models.map((m) => `${MODEL_LABELS[m]} about ${fee(plan.estimate[m])}`).join(', ');
     if (!window.confirm(`Run ${plan.items.length} of your listing photos through both models?\n\nEstimated cost: ${est}.\n\nBilled to your Anthropic API key.`)) return;
     const id = `t${Date.now()}`;
@@ -747,7 +755,7 @@ function ListingSetup({ s, set }) {
   return (
     <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12, display: 'grid', gap: 10 }}>
       <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>EBAY LISTING SETUP</h3>
-      <div className="ink-dim" style={{ fontSize: '0.75rem' }}>New listings copy the setup of your own newest Pokémon and Magic listings: category, condition codes, item details, ship-from location, return and payment policies, and Best Offer %.</div>
+      <div className="ink-dim" style={{ fontSize: '0.75rem' }}>New listings copy the setup of your own newest card listings (Yu-Gi-Oh!, One Piece, Lorcana and other games borrow it, with their own game details): category, condition codes, item details, ship-from location, return and payment policies, and Best Offer %.</div>
       {state.loading ? <Loader size={14} className="spin ink-faint" /> : !state.connected ? (
         <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Connect your eBay account on the eBay Listings tab first.</div>
       ) : (

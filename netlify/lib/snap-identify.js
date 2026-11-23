@@ -3,6 +3,7 @@
 // with every Claude call written to the API fee log. Dependencies are injectable for tests.
 import { readCard, fetchImage, SNAP_MODELS } from './card-vision.js';
 import { lookupCard } from './card-catalog.js';
+import { ebayMedianFor } from './market.js';
 import { applyIdentification, scoreTrial, titleNumber, SNAP_DEFAULTS } from './snap-logic.js';
 import { usageRow, logUsage, checkBudget, costOf } from './ai-usage.js';
 
@@ -59,7 +60,14 @@ export async function identifySnapItem({ db, userId, item, deps = {} }) {
     const r = await readAndLog({ db, userId, model, image, purpose: 'snap_identify', snapItemId: item.id, deps });
     const catalog = await (deps.lookupCard || lookupCard)(r.read).catch((e) => { console.error('catalog lookup', e.message); return null; });
     const duplicateItemId = await findDuplicate(db, userId, r.read).catch(() => null);
-    const patch = { ...applyIdentification({ read: r.read, catalog, settings, duplicateItemId }), model, identified_at: new Date().toISOString() };
+    // No usable catalog price (another game or language, or a printing the catalog lacks): use eBay's middle price.
+    let ebayMedian = null;
+    const hasCatalogPrice = catalog?.marketPrice != null && /^english$/i.test(r.read.language || 'English');
+    if (!hasCatalogPrice && r.read.is_trading_card && !r.read.graded && r.read.game !== 'sports' && (deps.browseSearch || process.env.EBAY_APP_ID)) {
+      const acct = await db.from('ebay_accounts').select('ebay_username').eq('user_id', userId).maybeSingle();
+      ebayMedian = await ebayMedianFor(r.read, { ownSeller: acct.data?.ebay_username || null, deps }).catch((e) => { console.error('ebay median', e.message); return null; });
+    }
+    const patch = { ...applyIdentification({ read: r.read, catalog, settings, duplicateItemId, ebayMedian }), model, identified_at: new Date().toISOString() };
     const { error: upErr } = await db.from('snap_items').update(patch).eq('id', item.id).eq('user_id', userId);
     if (upErr) throw new Error(upErr.message);
     return { item: { ...item, ...patch }, cost: r.cost, budget };

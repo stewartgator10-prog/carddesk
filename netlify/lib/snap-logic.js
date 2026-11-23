@@ -14,6 +14,13 @@ export const SNAP_DEFAULTS = {
 
 export const CONFIDENCE_OK = 0.8;
 
+// Games CardDesk knows. The first five are confirmed against a card catalog with prices;
+// "other" card games are priced from eBay listings; sports cards use a different eBay category.
+export const GAME_LABELS = { pokemon: 'Pokémon', mtg: 'Magic', yugioh: 'Yu-Gi-Oh!', one_piece: 'One Piece', lorcana: 'Lorcana', other: 'Other card game', sports: 'Sports' };
+export const CATALOG_GAMES = ['pokemon', 'mtg', 'yugioh', 'lorcana', 'one_piece'];
+export const LISTABLE_GAMES = [...CATALOG_GAMES, 'other'];
+const isEnglish = (lang) => /^english$/i.test(lang || 'English');
+
 // A listing's photos in eBay order: the main (identified) photo first, then the extras.
 // eBay itself allows 24; 12 keeps the check quick and is plenty for a single card.
 export const MAX_LISTING_PHOTOS = 12;
@@ -52,15 +59,27 @@ export function buildTitle(item) {
   const misprint = item.misprint_confirmed && item.misprint_notes ? `${shortMisprint(item.misprint_notes)} Misprint ` : '';
   const set = item.catalog_set || item.set_name || '';
   const finish = FINISH_LABEL[item.finish] || '';
+  // Lorcana prints "53/204"; its catalog only keeps the "53".
+  const num = item.game === 'lorcana' ? (item.collector_number || item.catalog_number) : (item.catalog_number || item.collector_number);
+  const worn = item.condition && item.condition !== 'NM' ? item.condition : '';
+  const join = (parts) => parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   let parts;
   if (item.game === 'mtg') {
-    const num = item.catalog_number || item.collector_number;
     parts = [`${misprint}${name}${variant}`, num ? `(${num})` : '', set, finish || 'Regular', 'Magic The Gathering', item.condition];
+  } else if (item.game === 'pokemon' || !item.game) {
+    parts = [`${misprint}${name}${variant}`, num, set, finish, worn];
   } else {
-    const num = item.catalog_number || item.collector_number;
-    parts = [`${misprint}${name}${variant}`, num, set, finish, item.condition && item.condition !== 'NM' ? item.condition : ''];
+    // Other games: "Ash Blossom & Joyous Spring RA01-EN008 25th Anniversary Rarity Collection Ultra Rare Yu-Gi-Oh"
+    const game = { yugioh: 'Yu-Gi-Oh', one_piece: 'One Piece', lorcana: 'Lorcana' }[item.game] || item.extraction?.game_name || '';
+    const lead = `${misprint}${name}${variant}`;
+    const tail = [item.game === 'lorcana' ? finish : '', game, worn];
+    // When it runs past eBay's 80 characters, the set name goes first, then the rarity.
+    for (const middle of [[num, set, item.rarity], [num, item.rarity], [num]]) {
+      parts = [lead, ...middle, ...tail];
+      if (join(parts).length <= 80) break;
+    }
   }
-  const full = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const full = join(parts);
   return full.length <= 80 ? full : full.slice(0, 80).replace(/\s+\S*$/, '');
 }
 
@@ -84,22 +103,29 @@ export const REVIEW_LABELS = {
   no_price: 'No market price',
   graded: 'Graded slab (not in phase 1)',
   not_a_card: 'Not a trading card',
-  other_game: 'Game not catalog-checked yet',
+  other_game: 'No catalog for this game: check the details',
+  sports_card: 'Sports card: can\'t be listed from here yet',
+  multiple_versions: 'Several versions or editions: check which one',
+  ebay_median: 'Priced from eBay listings: check',
   non_english: 'Not English',
   page_photo: 'Needs its own photo for eBay',
 };
 
 // Turns Claude's read + the catalog match into the queue row fields and review flags.
-export function applyIdentification({ read, catalog, settings = {}, duplicateItemId = null }) {
+// ebayMedian is the middle price of matching eBay listings, used when the catalog has no price for this card.
+export function applyIdentification({ read, catalog, settings = {}, duplicateItemId = null, ebayMedian = null }) {
   const reasons = [];
   if (!read.is_trading_card) reasons.push('not_a_card');
   if (read.graded) reasons.push('graded');
-  if (!['pokemon', 'mtg'].includes(read.game)) reasons.push('other_game');
-  if (read.language && !/^english$/i.test(read.language)) reasons.push('non_english');
+  const inCatalog = CATALOG_GAMES.includes(read.game);
+  if (read.game === 'sports') reasons.push('sports_card');
+  else if (!inCatalog) reasons.push('other_game');
+  if (!isEnglish(read.language)) reasons.push('non_english');
   if (!(read.confidence >= CONFIDENCE_OK)) reasons.push('low_confidence');
-  if (['pokemon', 'mtg'].includes(read.game)) {
+  if (inCatalog) {
     if (!catalog) reasons.push('not_in_catalog');
     else {
+      if (catalog.versions > 1) reasons.push('multiple_versions');
       if (catalog.matchLevel === 'name') reasons.push('name_only_match');
       const a = String(catalog.name || '').toLowerCase(), b = String(read.card_name || '').toLowerCase();
       if (a && b && !a.includes(b) && !b.includes(a)) reasons.push('name_mismatch');
@@ -107,7 +133,11 @@ export function applyIdentification({ read, catalog, settings = {}, duplicateIte
   }
   if (read.possible_misprint) reasons.push('possible_misprint');
   if (duplicateItemId) reasons.push('already_listed');
-  const market = catalog?.marketPrice ?? null;
+  // Catalog prices are for English printings, so another language is priced from eBay instead.
+  const catalogPrice = isEnglish(read.language) ? catalog?.marketPrice ?? null : null;
+  const fromEbay = catalogPrice == null && ebayMedian != null;
+  if (fromEbay) reasons.push('ebay_median');
+  const market = catalogPrice ?? ebayMedian ?? null;
   const suggested = suggestPrice(market, settings);
   if (suggested == null) reasons.push('no_price');
 
@@ -121,6 +151,7 @@ export function applyIdentification({ read, catalog, settings = {}, duplicateIte
     collector_number: read.collector_number,
     finish: read.finish,
     variant: read.variant,
+    rarity: catalog?.rarity ?? read.rarity ?? null,
     language: read.language,
     condition: read.condition_guess && read.condition_guess !== 'unknown' ? read.condition_guess : 'NM',
     misprint_flag: !!read.possible_misprint,
@@ -134,11 +165,11 @@ export function applyIdentification({ read, catalog, settings = {}, duplicateIte
     catalog_url: catalog?.url ?? null,
     match_level: catalog?.matchLevel ?? 'none',
     market_price: market,
-    price_source: market != null ? `TCGplayer market${catalog?.priceKey ? ` (${catalog.priceKey})` : ''}` : null,
+    price_source: fromEbay ? 'eBay listings (median)' : market != null ? `TCGplayer market${catalog?.priceKey ? ` (${catalog.priceKey})` : ''}` : null,
     suggested_price: suggested,
     // When only the name matched, the catalog may have picked another printing worth far more or
     // less (Shivan Dragon: $0.16 vs a $23 reprint), so the seller has to set the price.
-    price: catalog?.matchLevel === 'name' ? null : suggested,
+    price: catalog?.matchLevel === 'name' && !fromEbay ? null : suggested,
     duplicate_item_id: duplicateItemId,
     review_reasons: reasons,
     status: reasons.length ? 'needs_review' : 'ready',
