@@ -213,7 +213,11 @@ export function matchLinesToInventory(lines, inventory) {
 
   for (const l of lines) {
     if (already.has(l.line_item_id)) continue;
-    const free = available.filter((i) => !used.has(i.id));
+    // A card added to inventory after the sale can't be the card that sold (e.g. the remaining
+    // copies of a multi-quantity listing imported later), so only older cards are candidates.
+    const soldAt = l.sold_at_hint ? Date.parse(l.sold_at_hint) : NaN;
+    const free = available.filter((i) => !used.has(i.id)
+      && !(Number.isFinite(soldAt) && i.created_at && Date.parse(i.created_at) > soldAt + 60_000));
     let m = null;
     if (l.legacy_item_id) {
       const hit = free.find((i) => i.ebay_item_id && String(i.ebay_item_id) === String(l.legacy_item_id));

@@ -112,7 +112,7 @@ export async function recompute(db, userId, orderIds) {
     allTxns.push(...await must(db.from('ebay_transactions').select('*').eq('user_id', userId).in('order_id', c)));
   }
   const inventory = await must(db.from('inventory')
-    .select('id, card_name, status, cost_basis, ebay_item_id, sku, ebay_order_line_id').eq('user_id', userId));
+    .select('id, card_name, status, cost_basis, cost_source, ebay_item_id, sku, ebay_order_line_id, created_at').eq('user_id', userId));
   const settingsRow = await must(db.from('settings').select('data').eq('user_id', userId).maybeSingle());
   const settings = settingsRow?.data || {};
 
@@ -131,7 +131,9 @@ export async function recompute(db, userId, orderIds) {
   }
 
   // ---- match unmatched, non-cancelled lines to inventory ----
-  const candidates = allLines.filter((l) => l.match_status === 'unmatched' && orderById.get(l.order_id)?.cancel_state !== 'CANCELED');
+  const candidates = allLines
+    .filter((l) => l.match_status === 'unmatched' && orderById.get(l.order_id)?.cancel_state !== 'CANCELED')
+    .map((l) => ({ ...l, sold_at_hint: orderById.get(l.order_id)?.created_at_ebay || null }));
   const matches = matchLinesToInventory(candidates, inventory);
   let autoMarkedSold = 0, suggested = 0;
   for (const m of matches) {
@@ -149,10 +151,12 @@ export async function recompute(db, userId, orderIds) {
   // ---- P&L ----
   const invById = new Map(inventory.map((i) => [i.id, i]));
   const costByLine = new Map();
+  const estimatedLines = new Set();
   for (const l of allLines) {
     if (l.inventory_id && ['auto', 'confirmed'].includes(l.match_status)) {
       const inv = invById.get(l.inventory_id);
       if (inv?.cost_basis != null) costByLine.set(l.line_item_id, Number(inv.cost_basis));
+      if (inv?.cost_basis != null && inv.cost_source === 'estimated') estimatedLines.add(l.line_item_id);
     }
   }
   const pnl = computeLinePnl({ orders: allOrders, lines: allLines, txns: allTxns, costByLine, settings });
@@ -163,6 +167,7 @@ export async function recompute(db, userId, orderIds) {
       inventory_id: l.inventory_id, match_method: l.match_method, match_status: l.match_status, match_confidence: l.match_confidence,
       gross: r.gross, fees: r.fees, fee_source: r.fee_source, shipping_label: r.shipping_label, ad_fees: r.ad_fees,
       refunds: r.refunds, other: r.other, net_payout: r.net_payout, cost_basis: r.cost_basis, profit: r.profit, sold_at: r.sold_at,
+      cost_estimated: estimatedLines.has(r.line_item_id),
       updated_at: new Date().toISOString(),
     };
   });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera } from 'lucide-react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera, Receipt } from 'lucide-react';
 import EbaySalesTab from './EbaySalesTab.jsx';
 import ListingsTab from './ListingsTab.jsx';
 import { supabase, apiFetch } from './lib/supabase.js';
@@ -7,6 +7,7 @@ import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, m
 import RepricerTab from './pricing/RepricerTab.jsx';
 // Loaded only when the tab is opened, so phones don't download it up front.
 const SnapTab = lazy(() => import('./SnapTab.jsx'));
+const CostsTab = lazy(() => import('./CostsTab.jsx'));
 import { SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
 import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
 
@@ -66,7 +67,7 @@ export default function CardDeskPro({ session }) {
   // eBay sales sync marks cards sold on the server. Re-read inventory when opening a screen that
   // shows or edits it, so a stale copy here can't overwrite that (e.g. flip a sold card back to In Stock).
   useEffect(() => {
-    if (invLoaded && ['inventory', 'repricer', 'analyzer'].includes(tab)) reloadInventory();
+    if (invLoaded && ['inventory', 'repricer', 'analyzer', 'costs'].includes(tab)) reloadInventory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
   const [legacyLocal, setLegacyLocal] = useState(() => readLegacyLocalData());
@@ -455,6 +456,7 @@ export default function CardDeskPro({ session }) {
         <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
         <button className={`tab-btn ${tab === 'comps' ? 'active' : ''}`} onClick={() => setTab('comps')}><BarChart3 size={16} /> Sold Comps</button>
         <button className={`tab-btn ${tab === 'inventory' ? 'active' : ''}`} onClick={() => setTab('inventory')}><Package size={16} /> Inventory · P&L</button>
+        <button className={`tab-btn ${tab === 'costs' ? 'active' : ''}`} onClick={() => setTab('costs')}><Receipt size={16} /> Costs</button>
         <button className={`tab-btn ${tab === 'listings' ? 'active' : ''}`} onClick={() => setTab('listings')}><Store size={16} /> eBay Listings</button>
         <button className={`tab-btn ${tab === 'repricer' ? 'active' : ''}`} onClick={() => setTab('repricer')}><Tag size={16} /> Repricer</button>
         <button className={`tab-btn ${tab === 'ebaysales' ? 'active' : ''}`} onClick={() => setTab('ebaysales')}><DollarSign size={16} /> eBay Sales · Real P&L</button>
@@ -772,7 +774,7 @@ export default function CardDeskPro({ session }) {
                         <div><div style={{ fontWeight: 500 }}>{i.cardName}</div><div className="ink-faint" style={{ fontSize: '0.7rem' }}>{i.game} · {i.set}</div></div>
                         <div style={{ fontSize: '0.8rem' }}>{i.condition}</div>
                         <div><span style={{ padding: '3px 8px', fontSize: '0.7rem', border: '1px solid', color: i.status === 'Sold' ? '#4ade80' : '#fbbf24', borderColor: i.status === 'Sold' ? '#4ade80' : '#fbbf24' }}>{i.status.toUpperCase()}</span></div>
-                        <div style={{ textAlign: 'right' }}>{fmt(cb)}</div>
+                        <div style={{ textAlign: 'right' }}>{fmt(cb)}{i.costSource === 'estimated' && <div style={{ fontSize: '0.6rem', color: '#fbbf24' }}>est.</div>}</div>
                         <div style={{ textAlign: 'right' }}>{fmt(currentVal)}</div>
                         <div style={{ textAlign: 'right' }} className={pl >= 0 ? 'accent-green' : 'accent-red'}><div style={{ fontWeight: 600 }}>{fmt(pl)}</div><div style={{ fontSize: '0.7rem' }}>{fmtPct(plPct)}</div></div>
                         <div className="ink-dim" style={{ fontSize: '0.75rem' }}>{i.acquired}</div>
@@ -787,6 +789,11 @@ export default function CardDeskPro({ session }) {
           </div>
         )}
         {tab === 'ebaysales' && <EbaySalesTab />}
+        {tab === 'costs' && (
+          <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
+            <CostsTab settings={settings} />
+          </Suspense>
+        )}
         {tab === 'snap' && (
           <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
             <SnapTab userId={userId} settings={settings} setSettings={setSettings} />

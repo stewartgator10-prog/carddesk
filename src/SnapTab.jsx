@@ -4,6 +4,7 @@ import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
+import { splitCost } from '../netlify/lib/cost-split.js';
 
 const money = (n, d = 2) => (n == null || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(d)}`);
 const fee = (n) => (n == null ? '—' : Number(n) < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
@@ -142,6 +143,22 @@ export default function SnapTab({ userId, settings, setSettings }) {
     setMsg(error ? { type: 'error', text: error.message } : { type: 'ok', text: `Approved ${ids.length} card${ids.length === 1 ? '' : 's'}. They'll be published to eBay in phase 2.` });
   }
 
+  // One order's total (cards + shipping + tax) split across the cards on screen by market value.
+  async function batchPurchase() {
+    const cards = visible.filter((i) => !['uploaded', 'identifying'].includes(i.status));
+    if (!cards.length) return;
+    const raw = window.prompt(`Total you paid for these ${cards.length} cards, including shipping and tax ($):`);
+    if (raw == null) return;
+    const total = Number(String(raw).replace(/[$,]/g, '').trim());
+    if (!Number.isFinite(total) || total < 0) { setMsg({ type: 'error', text: 'Enter a dollar amount, e.g. 24.50' }); return; }
+    const purchaseId = crypto.randomUUID();
+    const p = await supabase.from('purchases').insert({ id: purchaseId, user_id: userId, total_paid: total, split_method: 'market', source: 'Snap to List batch' });
+    if (p.error) { setMsg({ type: 'error', text: p.error.message }); return; }
+    const split = splitCost(total, cards.map((c) => ({ id: c.id, weight: c.market_price ?? c.price })));
+    for (const [id, cost] of split) await save(id, { cost_basis: cost, cost_source: 'purchase', purchase_id: purchaseId });
+    setMsg({ type: 'ok', text: `Split $${total.toFixed(2)} across ${cards.length} cards by market value.` });
+  }
+
   async function discard(item) {
     setItems((xs) => xs.filter((x) => x.id !== item.id));
     const { error } = await supabase.from('snap_items').update({ status: 'discarded' }).eq('id', item.id);
@@ -193,6 +210,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
             ))}
             <span style={{ flex: 1 }} />
             <button className="btn-ghost" onClick={loadItems} title="Reload" style={{ padding: '6px 10px' }}><RefreshCw size={14} /></button>
+            <button className="btn-ghost" disabled={!visible.length} onClick={batchPurchase} title="Split what you paid for these cards across them" style={{ padding: '6px 10px', fontSize: '0.7rem' }}>$ Purchase cost</button>
             <button className="btn-primary" disabled={!counts.ready} onClick={approveAllReady} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Check size={14} /> APPROVE ALL READY ({counts.ready})</button>
           </div>
           {visible.length === 0 ? (
@@ -278,6 +296,12 @@ function SnapCard({ it, photo, onSave, onApprove, onDiscard, onRetry }) {
             <input className="bg-input" style={{ ...inp, width: 90 }} type="number" step="0.01" min="0.99" value={d.price ?? ''} onChange={(e) => field('price', e.target.value)} onBlur={() => commit({ price: d.price === '' ? null : Number(d.price) })} />
             {it.suggested_price != null && Number(d.price) !== Number(it.suggested_price) && <button className="btn-ghost" style={{ padding: '3px 6px', fontSize: '0.65rem' }} onClick={() => { field('price', it.suggested_price); commit({ price: it.suggested_price }); }}>Use {money(it.suggested_price)}</button>}
             <span className="ink-faint" title={it.price_source || ''}>market {money(it.market_price)}</span>
+          </div>
+          <div style={{ gridColumn: 'span 2', display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.75rem', flexWrap: 'wrap' }}>
+            <span className="ink-faint">Cost $</span>
+            <input className="bg-input" style={{ ...inp, width: 90 }} type="number" step="0.01" min="0" placeholder="paid" value={d.cost_basis ?? ''} onChange={(e) => field('cost_basis', e.target.value)}
+              onBlur={() => { const none = d.cost_basis === '' || d.cost_basis == null; commit({ cost_basis: none ? null : Number(d.cost_basis), cost_source: none ? null : 'entered', purchase_id: null }); }} />
+            {it.cost_source === 'purchase' && <span style={{ fontSize: '0.65rem', color: '#60a5fa' }}>from purchase</span>}
             {it.catalog_url && <a className="ink-faint" href={it.catalog_url} target="_blank" rel="noreferrer"><ExternalLink size={11} /></a>}
           </div>
         </div>

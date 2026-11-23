@@ -20,6 +20,7 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
         gte(c, v) { filters.push((r) => r[c] >= v); return b; },
         ilike(c, pat) { const re = new RegExp(`^${pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`, 'i'); filters.push((r) => re.test(r[c] ?? '')); return b; },
         insert(rows) { op = 'insert'; payload = Array.isArray(rows) ? rows : [rows]; return b; },
+        delete() { op = 'delete'; return b; },
         order() { return b; }, limit() { return b; },
         maybeSingle() { single = true; return b; },
         update(p) { op = 'update'; payload = p; return b; },
@@ -33,6 +34,11 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
             }
             if (op === 'update') {
               rows.filter((r) => filters.every((f) => f(r))).forEach((r) => Object.assign(r, payload));
+              return Promise.resolve({ data: null, error: null }).then(res, rej);
+            }
+            if (op === 'delete') {
+              const keep = rows.filter((r) => !filters.every((f) => f(r)));
+              rows.splice(0, rows.length, ...keep);
               return Promise.resolve({ data: null, error: null }).then(res, rej);
             }
             if (op === 'insert') {

@@ -132,7 +132,7 @@ export default function EbaySalesTab() {
         <Stat label="EBAY FEES" value={fmt(-s.fees)} sub={s.estimated_fees ? `${s.estimated_fees} sale(s) not final yet` : 'all from payouts'} />
         <Stat label="NET PAYOUT" value={fmt(s.net_payout)} sub={`labels ${fmt(s.shipping_label)} · ads ${fmt(s.ad_fees)} · refunds ${fmt(s.refunds)}`} />
         <Stat label="PROFIT" value={fmt(s.profit_after_overhead)} tone={s.profit_after_overhead}
-          sub={`${fmt(s.profit)} on sales, ${fmt(s.overhead)} store costs${s.missing_cost ? ` · ${s.missing_cost} sale(s) missing cost` : ''}`} />
+          sub={`${fmt(s.profit)} on sales, ${fmt(s.overhead)} store costs${s.missing_cost ? ` · ${s.missing_cost} sale(s) missing cost` : ''}${rows.some((r) => r.cost_estimated && r.cost_basis != null) ? ` · ${rows.filter((r) => r.cost_estimated && r.cost_basis != null).length} use estimated cost` : ''}`} />
       </div>
 
       {toReview.length > 0 && (
@@ -181,7 +181,7 @@ export default function EbaySalesTab() {
                   <div style={{ textAlign: 'right' }}>{fmt(r.shipping_label)}</div>
                   <div style={{ textAlign: 'right' }}>{fmt(r.ad_fees + r.refunds + r.other)}</div>
                   <div style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(r.net_payout)}</div>
-                  <div style={{ textAlign: 'right' }}>{fmt(r.cost_basis)}</div>
+                  <div style={{ textAlign: 'right' }}>{fmt(r.cost_basis)}{r.cost_estimated && r.cost_basis != null && <div style={{ fontSize: '0.6rem', color: '#fbbf24' }} title="Estimated cost">est.</div>}</div>
                   <div style={{ textAlign: 'right', fontWeight: 600 }} className={r.profit == null ? 'ink-faint' : r.profit >= 0 ? 'accent-green' : 'accent-red'}>{fmt(r.profit)}</div>
                   <div style={{ fontSize: '0.7rem' }}>
                     <div className="ink-dim">{MATCH_LABEL[r.match_status]}</div>
