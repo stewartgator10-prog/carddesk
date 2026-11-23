@@ -3,7 +3,7 @@
 // Every tool acts as the signed-in seller and reuses the same rules as the app's screens:
 // the eBay check before publishing, the "this exact listing passed" signature, the monthly
 // AI budget, server-side price limits. Handlers are plain functions so they can be tested.
-import { buildTitle, suggestPrice, REVIEW_LABELS } from './snap-logic.js';
+import { buildTitle, suggestPrice, REVIEW_LABELS, listingPhotoPaths } from './snap-logic.js';
 import { checkSnapItem, publishSnapItem } from './ebay-listing.js';
 import { summarizePnl } from './pnl.js';
 import { monthStart, MODEL_LABELS } from './ai-usage.js';
@@ -32,7 +32,7 @@ export function cardView(it) {
     flags: (it.review_reasons || []).map((r) => REVIEW_LABELS[r] || r),
     possible_misprint: it.misprint_flag ? (it.misprint_notes || 'yes') : null,
     misprint_confirmed: !!it.misprint_confirmed,
-    has_back_photo: !!it.back_photo_path,
+    photo_count: listingPhotoPaths(it).length,
     ebay_check: it.publish_state ? {
       state: it.publish_state, passed: it.publish_check?.ok ?? null, errors: it.publish_check?.errors || [],
       warnings: it.publish_check?.warnings || [], listing_fee: it.publish_check?.fees?.total ?? null, error: it.publish_error || null,

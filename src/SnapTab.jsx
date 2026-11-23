@@ -3,7 +3,7 @@ import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, Flask
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import CropImg from './lib/CropImg.jsx';
-import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
+import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
 
@@ -13,7 +13,7 @@ const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const OPEN = ['uploaded', 'identifying', 'ready', 'needs_review', 'failed', 'approved', 'listed'];
 const DONE = ['approved', 'listed'];
 // Editing any of these after the eBay check means the check no longer describes the listing.
-const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'back_photo_path'];
+const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 const STATUS = {
@@ -73,7 +73,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
 
   // Signed links for this user's private photos (valid for an hour).
   useEffect(() => {
-    const need = items.map((i) => i.photo_path).filter((p) => p && !photoUrls[p]);
+    const need = [...new Set(items.flatMap(listingPhotoPaths))].filter((p) => !photoUrls[p]);
     if (!need.length) return;
     supabase.storage.from('snap-photos').createSignedUrls(need, 3600).then(({ data }) => {
       if (data) setPhotoUrls((u) => ({ ...u, ...Object.fromEntries(data.filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl])) }));
@@ -151,16 +151,31 @@ export default function SnapTab({ userId, settings, setSettings }) {
     setMsg(error ? { type: 'error', text: error.message } : { type: 'ok', text: `Approved ${ids.length} card${ids.length === 1 ? '' : 's'}. Open "Approved" to check and publish them on eBay.` });
   }
 
-  // ---------- eBay: optional back photo, free check, publish ----------
-  async function addBackPhoto(item, file) {
+  // ---------- eBay: extra photos, free check, publish ----------
+  // The first photo identifies the card and leads the listing; these go on eBay after it, in order.
+  const extrasOf = (item) => listingPhotoPaths(item).filter((p) => p !== item.photo_path);
+  async function addExtraPhotos(item, fileList) {
+    const files = [...fileList].filter((f) => f.type.startsWith('image/'));
+    const room = MAX_LISTING_PHOTOS - listingPhotoPaths(item).length;
+    if (!files.length) return;
+    if (room <= 0) { setMsg({ type: 'error', text: `A listing can have up to ${MAX_LISTING_PHOTOS} photos.` }); return; }
+    const added = [];
     try {
-      const blob = await resizeForUpload(file);
-      const path = `${userId}/${item.batch_id || 'back'}/${item.id}-back.jpg`;
-      const up = await supabase.storage.from('snap-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-      if (up.error) throw new Error(up.error.message);
-      setPhotoUrls((u) => ({ ...u, [path]: URL.createObjectURL(blob) }));
-      await save(item.id, { back_photo_path: path, ebay_picture_urls: null });
-    } catch (e) { setMsg({ type: 'error', text: `Back photo failed: ${e.message}` }); }
+      for (const file of files.slice(0, room)) {
+        const blob = await resizeForUpload(file);
+        const path = `${userId}/${item.batch_id || 'snap'}/${item.id}-x-${crypto.randomUUID().slice(0, 8)}.jpg`;
+        const up = await supabase.storage.from('snap-photos').upload(path, blob, { contentType: 'image/jpeg' });
+        if (up.error) throw new Error(up.error.message);
+        setPhotoUrls((u) => ({ ...u, [path]: URL.createObjectURL(blob) }));
+        added.push(path);
+      }
+    } catch (e) { setMsg({ type: 'error', text: `Photo failed: ${e.message}` }); }
+    if (added.length) await save(item.id, { extra_photo_paths: [...extrasOf(item), ...added], ebay_picture_urls: null });
+    if (files.length > room) setMsg({ type: 'error', text: `Added ${added.length} of ${files.length}: a listing can have up to ${MAX_LISTING_PHOTOS} photos.` });
+  }
+  async function removeExtraPhoto(item, path) {
+    await save(item.id, { extra_photo_paths: extrasOf(item).filter((p) => p !== path), back_photo_path: null, ebay_picture_urls: null });
+    supabase.storage.from('snap-photos').remove([path]).catch(() => {}); // tidy up; the listing no longer points at it either way
   }
 
   // Cards from a buy-offer binder page start with only part of the page photo; this swaps in a real one.
@@ -303,7 +318,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} backPhoto={photoUrls[it.back_photo_path]} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onBack={(f) => addBackPhoto(it, f)} onReplace={(f) => replacePhoto(it, f)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} extras={listingPhotoPaths(it).filter((p) => p !== it.photo_path).map((p) => ({ path: p, url: photoUrls[p] }))} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onRemovePhoto={(p) => removeExtraPhoto(it, p)} onReplace={(f) => replacePhoto(it, f)} />)}
             </div>
           )}
           <div className="ink-faint" style={{ fontSize: '0.7rem' }}>
@@ -319,8 +334,8 @@ export default function SnapTab({ userId, settings, setSettings }) {
   );
 }
 
-function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry, onBack, onReplace }) {
-  const backInput = useRef(null);
+function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetry, onAddPhotos, onRemovePhoto, onReplace }) {
+  const moreInput = useRef(null);
   const frontInput = useRef(null);
   const [d, setD] = useState(it);
   useEffect(() => { setD(it); }, [it]);
@@ -348,16 +363,31 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
           {it.catalog_source && <span style={{ position: 'absolute', bottom: 2, right: 4, fontSize: '0.6rem' }} className="ink-faint">{it.catalog_source}</span>}
         </div>
       </div>
-      {!busy && it.status !== 'listed' && (
+      {!busy && it.status !== 'listed' && it.photo_crop && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.7rem' }}>
-          <input ref={backInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onBack(e.target.files[0]); e.target.value = ''; }} />
           <input ref={frontInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onReplace(e.target.files[0]); e.target.value = ''; }} />
-          {it.photo_crop && <button className="btn-primary" onClick={() => frontInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}><Camera size={12} /> Replace photo</button>}
-          {it.back_photo_path && backPhoto && <img src={backPhoto} alt="Back" style={{ width: 28, height: 39, objectFit: 'cover' }} />}
-          <button className="btn-ghost" onClick={() => backInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-            <Camera size={12} /> {it.back_photo_path ? 'Retake back' : 'Add back photo'}
-          </button>
-          <span className="ink-faint">{it.back_photo_path ? 'Front + back go on eBay' : 'Optional: front only otherwise'}</span>
+          <button className="btn-primary" onClick={() => frontInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}><Camera size={12} /> Replace photo</button>
+        </div>
+      )}
+
+      {!busy && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.7rem' }}>
+          <input ref={moreInput} type="file" accept="image/*" multiple aria-label="Add photos to this listing" style={{ display: 'none' }} onChange={(e) => { if (e.target.files.length) onAddPhotos(e.target.files); e.target.value = ''; }} />
+          {extras.map((x, i) => (
+            <div key={x.path} style={{ position: 'relative', width: 40, height: 56, background: 'var(--well)', borderRadius: 6, flex: 'none' }}>
+              {x.url ? <img src={x.url} alt={`Extra photo ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}
+              {it.status !== 'listed' && (
+                <button onClick={() => onRemovePhoto(x.path)} title="Remove this photo" aria-label={`Remove extra photo ${i + 1}`}
+                  style={{ position: 'absolute', top: -7, right: -7, width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--line-strong)', background: 'var(--paper)', color: 'var(--ink)', cursor: 'pointer', padding: 0, display: 'grid', placeItems: 'center' }}><X size={11} /></button>
+              )}
+            </div>
+          ))}
+          {it.status !== 'listed' && extras.length + 1 < MAX_LISTING_PHOTOS && (
+            <button className="btn-ghost" onClick={() => moreInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+              <Camera size={12} /> Add photos
+            </button>
+          )}
+          <span className="ink-faint">{extras.length ? `${extras.length + 1} photos go on eBay, main photo first` : 'Back, corners, close-ups (optional)'}</span>
         </div>
       )}
 

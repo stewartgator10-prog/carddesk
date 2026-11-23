@@ -8,6 +8,7 @@ import {
   FALLBACK_CONDITION_VALUES, listingUuid,
 } from '../netlify/lib/ebay-listing.js';
 import { fakeDb } from './fake-db.js';
+import { listingPhotoPaths, MAX_LISTING_PHOTOS } from '../netlify/lib/snap-logic.js';
 
 const U = 'u1';
 const prof = (ship, shipName) => ({ SellerProfiles: {
@@ -131,11 +132,11 @@ test('photo upload sends the XML part then the image bytes', async () => {
   assert.equal(url, 'https://i.ebayimg.com/x.jpg');
 });
 
-function publishDb(item) {
+function publishDb(item, moreFiles = {}) {
   return fakeDb({
     snap_items: [item], inventory: [], ebay_listings: [], settings: [],
     ebay_accounts: [{ id: 'acct', user_id: U, listing_templates: templates }],
-  }, null, { files: { 'u1/b/front.jpg': 'front', 'u1/b/back.jpg': 'back' } });
+  }, null, { files: { 'u1/b/front.jpg': 'front', 'u1/b/back.jpg': 'back', ...moreFiles } });
 }
 const uploadOk = async () => new Response('<UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>https://i.ebayimg.com/p.jpg</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>');
 const verifyOk = '<VerifyAddFixedPriceItemResponse><Ack>Warning</Ack><Errors><ShortMessage>Shipping</ShortMessage><LongMessage>Consider adding a weight.</LongMessage><SeverityCode>Warning</SeverityCode></Errors><Fees><Fee><Name>InsertionFee</Name><Fee currencyID="USD">0.0</Fee></Fee><Fee><Name>ListingFee</Name><Fee currencyID="USD">0.0</Fee></Fee></Fees></VerifyAddFixedPriceItemResponse>';
@@ -206,4 +207,37 @@ test('publish failure leaves the card approved and records why', async () => {
   assert.equal(db.tables.snap_items[0].status, 'approved');
   assert.equal(db.tables.snap_items[0].publish_state, 'failed');
   assert.equal(db.tables.inventory.length, 0);
+});
+
+test('a listing can carry several photos: main first, extras in order, capped, and only the seller\'s own', async () => {
+  const extras = ['u1/b/x1.jpg', 'u1/b/x2.jpg', 'u1/b/x3.jpg'];
+  const files = Object.fromEntries(extras.map((p) => [p, p]));
+  assert.deepEqual(listingPhotoPaths({ photo_path: 'a', back_photo_path: 'old-back' }), ['a', 'old-back']);          // older cards
+  assert.deepEqual(listingPhotoPaths({ photo_path: 'a', back_photo_path: 'old-back', extra_photo_paths: ['b', 'a', 'c'] }), ['a', 'b', 'c']);
+
+  const db = publishDb(card({ back_photo_path: null, extra_photo_paths: extras }), files);
+  const uploaded = [];
+  const fetchImpl = async (_url, init) => {
+    const name = /filename="([^"]+)"/.exec(init.body.toString('latin1'))[1];
+    uploaded.push(name);
+    return new Response(`<UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>https://i.ebayimg.com/${name}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`);
+  };
+  let sentXml = '';
+  await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl, call: async (_t, _n, xml) => { sentXml = xml; return verifyOk; } });
+  const row = db.tables.snap_items[0];
+  assert.deepEqual(row.ebay_picture_urls, [1, 2, 3, 4].map((n) => `https://i.ebayimg.com/SNAP-0F8FAD5BD9-${n}.jpg`));
+  assert.equal(uploaded.length, 4);
+  assert.equal((sentXml.match(/<PictureURL>/g) || []).length, 4);
+  assert.ok(sentXml.indexOf('SNAP-0F8FAD5BD9-1.jpg') < sentXml.indexOf('SNAP-0F8FAD5BD9-4.jpg'));   // main photo leads the listing
+
+  // A second check with the same photos does not upload them again.
+  await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl, call: async () => verifyOk });
+  assert.equal(uploaded.length, 4);
+
+  const many = Array.from({ length: MAX_LISTING_PHOTOS }, (_, i) => `u1/b/m${i}.jpg`);
+  const tooMany = publishDb(card({ back_photo_path: null, extra_photo_paths: many }));
+  await assert.rejects(checkSnapItem({ db: tooMany, userId: U, token: 't', item: tooMany.tables.snap_items[0], settings: {}, fetchImpl, call: async () => verifyOk }), /up to 12 photos/);
+  const foreign = publishDb(card({ back_photo_path: null, extra_photo_paths: ['someone-else/b/x.jpg'] }));
+  await assert.rejects(checkSnapItem({ db: foreign, userId: U, token: 't', item: foreign.tables.snap_items[0], settings: {}, fetchImpl, call: async () => verifyOk }), /does not belong to you/);
+  assert.equal(uploaded.length, 4);
 });

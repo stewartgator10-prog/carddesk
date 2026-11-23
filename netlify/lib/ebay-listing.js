@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { tradingCall } from './trading-price.js';
-import { titleNumber } from './snap-logic.js';
+import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths } from './snap-logic.js';
 
 export const CCG_CATEGORY = '183454'; // CCG Individual Cards (Pokémon, Magic, ...)
 export const UNGRADED_CONDITION = '4000';
@@ -293,10 +293,16 @@ export async function checkSnapItem({ db, userId, token, item, settings, call = 
   await must(db.from('snap_items').update({ publish_state: 'checking', publish_error: null }).eq('id', item.id).eq('user_id', userId));
   try {
     let urls = item.ebay_picture_urls || [];
-    const paths = [item.photo_path, item.back_photo_path].filter(Boolean);
+    const paths = listingPhotoPaths(item);
+    if (paths.length > MAX_LISTING_PHOTOS) throw Object.assign(new Error(`A listing can have up to ${MAX_LISTING_PHOTOS} photos. Remove ${paths.length - MAX_LISTING_PHOTOS} first.`), { status: 409 });
+    if (paths.some((p) => !String(p).startsWith(`${userId}/`))) throw Object.assign(new Error('One of the photos does not belong to you.'), { status: 403 });
     if (urls.length !== paths.length) {
+      // A few at a time, so a card with many photos still finishes well inside the time limit.
       urls = [];
-      for (const [i, p] of paths.entries()) urls.push(await uploadPicture({ token, imageBytes: await photoBytes(db, p), name: `${snapSku(item.id)}-${i + 1}`, fetchImpl }));
+      for (let i = 0; i < paths.length; i += 4) {
+        urls.push(...await Promise.all(paths.slice(i, i + 4).map(async (p, j) =>
+          uploadPicture({ token, imageBytes: await photoBytes(db, p), name: `${snapSku(item.id)}-${i + j + 1}`, fetchImpl }))));
+      }
     }
     const sku = item.sku || snapSku(item.id);
     const full = { ...item, sku, ebay_picture_urls: urls };
