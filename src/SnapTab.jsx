@@ -627,7 +627,52 @@ function SnapSettings({ s, settings, setSettings }) {
         <div className="ink-faint" style={{ fontSize: '0.7rem', marginTop: 4 }}>New AI calls stop when this month's estimated spend reaches the budget. Nothing already done is affected.</div></div>
       <div className="ink-faint" style={{ fontSize: '0.7rem' }}>Example: market $0.27 → {s.snapMinPrice ? `$${Number(s.snapMinPrice).toFixed(2)}` : ''} (minimum). Market $4.74 → rounded up to the {s.snapEnding === 'cents' ? 'cent' : `next ${s.snapEnding.slice(1)}`} after markup.</div>
       <ListingSetup s={s} set={set} />
+      <AiConnector />
     </section>
+  );
+}
+
+// The Claude app connector: where to point it, and which AI apps currently have access.
+function AiConnector() {
+  const url = `${window.location.origin}/mcp`;
+  const [grants, setGrants] = useState(null);
+  const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.auth.oauth.listGrants();
+    if (error) { setErr(/not enabled|not found|404/i.test(error.message) ? 'Sign-in for AI apps is not switched on in Supabase yet (see the setup steps).' : error.message); setGrants([]); return; }
+    setGrants(data || []);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  async function revoke(g) {
+    if (!window.confirm(`Disconnect ${g.client?.name || 'this app'}? It loses access to CardDesk right away.`)) return;
+    const { error } = await supabase.auth.oauth.revokeGrant({ clientId: g.client.id });
+    if (error) setErr(error.message); else load();
+  }
+  return (
+    <div style={{ borderTop: '1px solid #2a2a36', paddingTop: 12, display: 'grid', gap: 10 }}>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>CLAUDE APP CONNECTOR</h3>
+      <div className="ink-dim" style={{ fontSize: '0.75rem' }}>
+        Let the Claude app review, price, approve, check and publish your snapped cards, and answer profit questions, by chatting.
+        In Claude: Settings → Connectors → Add custom connector, paste this address, then Connect and sign in with your CardDesk account.
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input className="bg-input" readOnly value={url} onFocus={(e) => e.target.select()} style={{ flex: 1, padding: '8px 10px', fontSize: '0.8rem' }} />
+        <button className="btn-ghost" onClick={() => { navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); }} style={{ padding: '8px 12px', fontSize: '0.75rem' }}>{copied ? 'Copied' : 'Copy'}</button>
+      </div>
+      <div className="ink-faint" style={{ fontSize: '0.7rem' }}>Photos are still taken here on your phone; Claude works on the queue. Publishing always asks you first.</div>
+      <div style={{ fontSize: '0.75rem' }}>
+        <div className="ink-faint" style={{ letterSpacing: '0.1em', fontSize: '0.65rem', marginBottom: 4 }}>CONNECTED APPS</div>
+        {grants === null ? <Loader size={13} className="spin ink-faint" /> : grants.length === 0 ? <div className="ink-faint">None connected.</div>
+          : grants.map((g) => (
+            <div key={g.client?.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #1f1f2a' }}>
+              <div style={{ flex: 1 }}>{g.client?.name || 'App'}<div className="ink-faint" style={{ fontSize: '0.65rem' }}>since {new Date(g.granted_at).toLocaleDateString()}</div></div>
+              <button className="btn-ghost" onClick={() => revoke(g)} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>Disconnect</button>
+            </div>
+          ))}
+        {err && <div className="accent-amber" style={{ fontSize: '0.7rem', marginTop: 4 }}>{err}</div>}
+      </div>
+    </div>
   );
 }
 
