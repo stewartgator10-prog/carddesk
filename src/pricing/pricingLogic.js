@@ -15,22 +15,43 @@ export function tokenize(s) {
     .filter(t => t && !STOP_WORDS.has(t));
 }
 
-// Grade/condition detection from a listing title. Order matters: most specific first.
-const GRADE_PATTERNS = [
-  ['PSA 10', /\bpsa\s*10\b/i], ['PSA 9', /\bpsa\s*9\b/i], ['PSA 8', /\bpsa\s*8\b/i],
-  ['BGS 9.5', /\bbgs\s*9\.5\b/i], ['BGS 9', /\bbgs\s*9\b/i],
-  ['CGC 10', /\bcgc\s*10\b/i], ['CGC 9', /\bcgc\s*9\b/i],
+// Grade/condition detection from a listing title or an eBay condition string.
+// Any slab grade from the big four graders (PSA 7, BGS 9.5, CGC 9.5, SGC 10...) wins over raw words.
+const GRADE_RE = /\b(psa|bgs|cgc|sgc)\s*-?\s*(10|[1-9](?:\.5)?)\b/i;
+const RAW_PATTERNS = [
   ['DMG', /\bdamaged\b|\bdmg\b/i], ['HP', /\bheavily played\b|\bhp\b/i],
   ['MP', /\bmoderately played\b|\bmp\b/i], ['LP', /\blightly played\b|\blp\b/i],
   ['NM', /\bnear mint\b|\bnm\b/i],
 ];
 
 export function detectCondition(title, fallback = null) {
-  for (const [label, re] of GRADE_PATTERNS) if (re.test(title || '')) return label;
+  const g = String(title || '').match(GRADE_RE);
+  if (g) return `${g[1].toUpperCase()} ${g[2]}`;
+  for (const [label, re] of RAW_PATTERNS) if (re.test(title || '')) return label;
   return fallback;
 }
 
-const isGraded = c => /^(PSA|BGS|CGC)/.test(c || '');
+// eBay's Browse API reports graded cards as just "Graded"; the grade itself is in the title.
+export function conditionFromEbay(condition, title) {
+  return detectCondition(condition) || detectCondition(title) || 'NM';
+}
+
+// Price from one pasted sale-list line ("Charizard 020/189 $45", "Lugia V alt art - 120").
+// A $ amount wins; otherwise the last plain number that isn't a card number (020/189) or a grade.
+export function extractAskPrice(line) {
+  const s = String(line || '');
+  const dollar = s.match(/\$\s?(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/);
+  if (dollar) return { price: parseFloat(dollar[1].replace(/,/g, '') + (dollar[2] || '')), token: dollar[0] };
+  const masked = s
+    .replace(/\b\d+\s*\/\s*\d+\b/g, m => ' '.repeat(m.length))
+    .replace(new RegExp(GRADE_RE.source, 'gi'), m => ' '.repeat(m.length));
+  const nums = [...masked.matchAll(/(?<![\w.,])(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?(?!\w|[.,]\d)/g)];
+  if (!nums.length) return null;
+  const last = nums[nums.length - 1];
+  return { price: parseFloat(last[1].replace(/,/g, '') + (last[2] || '')), token: last[0], index: last.index };
+}
+
+const isGraded = c => /^(PSA|BGS|CGC|SGC)/.test(c || '');
 
 // A record "matches" a listing when every meaningful token of its card name appears in the
 // listing title (or in the listing's manual comp key, if the user set one).
@@ -93,10 +114,11 @@ export function costForListing(listing, inventory) {
   if (listing.costBasis != null && listing.costBasis !== '') return parseFloat(listing.costBasis);
   // Prefer an inventory item explicitly tied to this eBay listing, then fall back to name matching.
   const byId = inventory.find(i => i.ebayItemId && String(i.ebayItemId) === String(listing.itemId));
-  if (byId && byId.costBasis !== '' && byId.costBasis != null) return parseFloat(byId.costBasis) || null;
+  const toCost = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; }; // a $0 cost (a pull, a gift) is still a cost
+  if (byId && byId.costBasis !== '' && byId.costBasis != null) return toCost(byId.costBasis);
   const text = listing.compKey || listing.title;
   const hit = inventory.find(i => i.status !== 'Sold' && nameMatches(text, i.cardName, i.set));
-  return hit ? parseFloat(hit.costBasis) || null : null;
+  return hit ? toCost(hit.costBasis) : null;
 }
 
 export function netAfterFees(price, settings, shippingOut = 0) {

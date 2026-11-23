@@ -32,7 +32,7 @@ async function getEbayToken() {
   return cachedToken;
 }
 
-function extractEbayItemId(url) {
+export function extractEbayItemId(url) {
   // Patterns: /itm/123456789012 or /itm/title/123456789012 or ?item=123456789012
   const patterns = [
     /\/itm\/(?:[^/]+\/)?(\d{10,15})/,
@@ -41,7 +41,8 @@ function extractEbayItemId(url) {
   ];
   for (const p of patterns) {
     const m = url.match(p);
-    if (m) return m[1];
+    // hash=item<hex> carries the item number in hexadecimal.
+    if (m) return p.source.startsWith('hash') ? BigInt('0x' + m[1]).toString() : m[1];
   }
   return null;
 }

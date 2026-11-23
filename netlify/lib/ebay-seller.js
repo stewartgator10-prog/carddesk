@@ -135,10 +135,14 @@ export async function getSellerAccessToken(supabaseAdmin, userId) {
 // Listings created on eBay.com (not via the Inventory API) are only fully
 // readable/editable through the Trading API. It accepts the OAuth user token
 // in the X-EBAY-API-IAF-TOKEN header.
-const xml = new XMLParser({
+// parseTagValue: false keeps every value as text. Without it the parser turns
+// SKU "00123" into 123 and "1e5" into 100000, and a title like "151" into a
+// number. Numeric fields go through num() below instead.
+export const xml = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   textNodeName: '#text',
+  parseTagValue: false,
   isArray: (name) => ['Item', 'Errors'].includes(name),
 });
 
@@ -179,8 +183,8 @@ export function mapTradingItem(item) {
   const sold = num(item.SellingStatus?.QuantitySold) ?? 0;
   return {
     item_id: String(item.ItemID),
-    title: item.Title ?? null,
-    sku: item.SKU ?? null,
+    title: item.Title != null ? String(item.Title) : null,
+    sku: item.SKU != null && item.SKU !== '' ? String(item.SKU) : null,
     price: num(price),
     currency: price?.['@_currencyID'] ?? 'USD',
     quantity,

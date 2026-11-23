@@ -52,7 +52,7 @@ export default async (req) => {
   try {
     const url = new URL(req.url);
     const query = url.searchParams.get('q');
-    const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit'), 10) || 20, 1), 50);
     const sortBy = url.searchParams.get('sort') || 'price'; // 'price', 'newlyListed', or 'bestMatch'
 
     if (!query) {

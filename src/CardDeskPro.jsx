@@ -5,6 +5,7 @@ import ListingsTab from './ListingsTab.jsx';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, markLegacyLocalDataHandled } from './lib/store.js';
 import RepricerTab from './pricing/RepricerTab.jsx';
+import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
 
 const DEFAULT_SETTINGS = {
   ebayFeePct: 13.25,
@@ -17,7 +18,9 @@ const DEFAULT_SETTINGS = {
 };
 
 const GAMES = ['Pokémon', 'MTG'];
-const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG', 'PSA 10', 'PSA 9', 'PSA 8', 'BGS 9.5', 'BGS 9', 'CGC 10', 'CGC 9'];
+const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG', 'PSA 10', 'PSA 9', 'PSA 8', 'PSA 7', 'BGS 10', 'BGS 9.5', 'BGS 9', 'CGC 10', 'CGC 9.5', 'CGC 9', 'SGC 10', 'SGC 9'];
+// Keeps an unusual detected grade (e.g. PSA 6) selectable instead of silently showing the first option.
+const conditionOptions = (current) => (current && !CONDITIONS.includes(current) ? [...CONDITIONS, current] : CONDITIONS);
 const CHANNELS = ['eBay', 'TCGplayer', 'Cardmarket', 'LGS', 'Private', 'Other'];
 const LIQUIDITY_TIERS = ['High', 'Medium', 'Low', 'Dead Stock'];
 
@@ -46,22 +49,6 @@ function computeMedian(arr) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-// Map an eBay condition string to our internal condition codes
-function mapCondition(s) {
-  if (!s) return 'NM';
-  const low = s.toLowerCase();
-  if (low.includes('psa 10') || low.includes('gem mint 10')) return 'PSA 10';
-  if (low.includes('psa 9')) return 'PSA 9';
-  if (low.includes('bgs 9.5')) return 'BGS 9.5';
-  if (low.includes('bgs 9')) return 'BGS 9';
-  if (low.includes('cgc 10') || low.includes('cgc 9.5')) return 'CGC 10';
-  if (low.includes('cgc 9')) return 'CGC 9';
-  if (low.includes('lightly') || low.includes('played - light')) return 'LP';
-  if (low.includes('moderately') || low.includes('mp')) return 'MP';
-  if (low.includes('heavily')) return 'HP';
-  if (low.includes('damaged')) return 'DMG';
-  return 'NM';
-}
 
 export default function CardDeskPro({ session }) {
   const userId = session.user.id;
@@ -72,6 +59,12 @@ export default function CardDeskPro({ session }) {
   const { items: comps, setItems: setComps, loaded: compsLoaded, reload: reloadComps } = useCollection('comps', userId, setDataError);
   const { items: inventory, setItems: setInventory, loaded: invLoaded, reload: reloadInventory } = useCollection('inventory', userId, setDataError);
   const dataLoaded = settingsLoaded && watchLoaded && compsLoaded && invLoaded;
+  // eBay sales sync marks cards sold on the server. Re-read inventory when opening a screen that
+  // shows or edits it, so a stale copy here can't overwrite that (e.g. flip a sold card back to In Stock).
+  useEffect(() => {
+    if (invLoaded && ['inventory', 'repricer', 'analyzer'].includes(tab)) reloadInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
   const [legacyLocal, setLegacyLocal] = useState(() => readLegacyLocalData());
   const [importMsg, setImportMsg] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -105,7 +98,7 @@ export default function CardDeskPro({ session }) {
         setACardName(data.cardName || data.title || '');
         setAAskPrice(data.price ? String(data.price) : '');
         setAShippingIn(data.shippingCost ? String(data.shippingCost) : '0');
-        setACondition(mapCondition(data.condition));
+        setACondition(conditionFromEbay(data.condition, data.title));
         const m = (data.title || '').match(/pok[ée]mon|pokemon/i);
         if (m) setAGame('Pokémon');
         else if (/magic|mtg/i.test(data.title || '')) setAGame('MTG');
@@ -147,7 +140,7 @@ export default function CardDeskPro({ session }) {
     const fmv = parseFloat(aFmv);
     const shipIn = parseFloat(aShippingIn) || 0;
     const shipOut = parseFloat(aShippingOut) || 0;
-    if (!ask || !fmv) return null;
+    if (!(ask > 0) || !(fmv > 0)) return null; // negative/zero values would leave no verdict tier to show
     const totalCost = ask + shipIn;
     const netIfResold = calcNetProceeds(fmv, aResaleChannel, settings, shipOut);
     const profit = netIfResold - totalCost;
@@ -229,7 +222,7 @@ export default function CardDeskPro({ session }) {
     setACardName(item.title);
     setAAskPrice(String(item.price));
     setAShippingIn(String(item.shippingCost || 0));
-    setACondition(mapCondition(item.condition));
+    setACondition(conditionFromEbay(item.condition, item.title));
     if (searchFmvNum > 0) setAFmv(String(searchFmvNum));
     setTab('analyzer');
   }
@@ -242,10 +235,11 @@ export default function CardDeskPro({ session }) {
     const lines = pasteText.split('\n').map(l => l.trim()).filter(Boolean);
     const results = [];
     for (const line of lines) {
-      const priceMatch = line.match(/\$?(\d+(?:\.\d{1,2})?)/);
-      if (!priceMatch) continue;
-      const price = parseFloat(priceMatch[1]);
-      const nameRaw = line.replace(priceMatch[0], '').replace(/[|@-]/g, ' ').trim();
+      const found = extractAskPrice(line); // skips card numbers like 020/189 and grades like PSA 10
+      if (!found) continue;
+      const price = found.price;
+      const at = found.index ?? line.indexOf(found.token);
+      const nameRaw = (line.slice(0, at) + line.slice(at + found.token.length)).replace(/[|@-]/g, ' ').replace(/\s+/g, ' ').trim();
       if (!nameRaw) continue;
       const nameLow = nameRaw.toLowerCase();
       const match = watchlist.find(w => {
@@ -311,8 +305,10 @@ export default function CardDeskPro({ session }) {
       const fmv = parseFloat(i.currentFmv) || 0;
       invCost += cb; invMarket += fmv; unrealized += (fmv - cb);
     });
-    const avgMargin = sold.length > 0 ? (realized / costBasisSold) * 100 : 0;
-    const avgHold = sold.length > 0 ? sold.reduce((acc, i) => acc + (new Date(i.sold) - new Date(i.acquired)) / (1000 * 60 * 60 * 24), 0) / sold.length : 0;
+    const avgMargin = costBasisSold > 0 ? (realized / costBasisSold) * 100 : 0;
+    // Only cards with both dates count; imported or eBay-synced cards often have no acquired date.
+    const holds = sold.map(i => (new Date(i.sold) - new Date(i.acquired)) / 86400000).filter(Number.isFinite);
+    const avgHold = holds.length ? holds.reduce((a, b) => a + b, 0) / holds.length : 0;
     return { realized, unrealized, invCost, invMarket, avgMargin, avgHold, soldCount: sold.length, stockCount: inStock.length, totalSales };
   }, [inventory, settings]);
 
@@ -491,7 +487,7 @@ export default function CardDeskPro({ session }) {
                 <div style={{ gridColumn: 'span 2' }}><label>Card Name</label><input className="bg-input" value={aCardName} onChange={e => setACardName(e.target.value)} placeholder="e.g. Charizard VMAX" /></div>
                 <div><label>Game</label><select className="bg-input" value={aGame} onChange={e => setAGame(e.target.value)}>{GAMES.map(g => <option key={g}>{g}</option>)}</select></div>
                 <div><label>Set / Edition</label><input className="bg-input" value={aSet} onChange={e => setASet(e.target.value)} placeholder="e.g. Darkness Ablaze" /></div>
-                <div><label>Condition / Grade</label><select className="bg-input" value={aCondition} onChange={e => setACondition(e.target.value)}>{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div>
+                <div><label>Condition / Grade</label><select className="bg-input" value={aCondition} onChange={e => setACondition(e.target.value)}>{conditionOptions(aCondition).map(c => <option key={c}>{c}</option>)}</select></div>
                 <div><label>Liquidity</label><select className="bg-input" value={aLiquidity} onChange={e => setALiquidity(e.target.value)}>{LIQUIDITY_TIERS.map(l => <option key={l}>{l}</option>)}</select></div>
                 <div><label>Ask Price ($)</label><input className="bg-input" type="number" step="0.01" value={aAskPrice} onChange={e => setAAskPrice(e.target.value)} placeholder="0.00" /></div>
                 <div><label>Shipping In ($)</label><input className="bg-input" type="number" step="0.01" value={aShippingIn} onChange={e => setAShippingIn(e.target.value)} placeholder="0.00" /></div>

@@ -65,7 +65,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
     return { listing, stats, cost, floor, editable };
   }), [state.listings, links, comps, inventory, settings]);
 
-  const visible = rows.filter(r => !filter || r.listing.title.toLowerCase().includes(filter.toLowerCase()));
+  const visible = rows.filter(r => !filter || String(r.listing.title || '').toLowerCase().includes(filter.toLowerCase()));
   const ctxFor = r => ({ stats: r.stats, floor: r.floor, enforceFloor, rounding });
 
   const pending = rows.map(r => {
@@ -127,7 +127,9 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
         ...h,
       ].slice(0, 300));
       const failed = res.results.length - okIds.size;
-      alertOnce(`${res.demo ? 'Demo: ' : ''}${okIds.size} price${okIds.size === 1 ? '' : 's'} updated${failed ? `, ${failed} failed (drafts kept)` : ''}.`);
+      const offerFixes = res.results.filter(r => r.ok && r.warnings?.some(w => /Best Offer/.test(w))).length;
+      alertOnce(`${res.demo ? 'Demo: ' : ''}${okIds.size} price${okIds.size === 1 ? '' : 's'} updated${failed ? `, ${failed} failed (drafts kept)` : ''}.`
+        + (offerFixes ? ` ${offerFixes} listing${offerFixes === 1 ? '' : 's'} also had Best Offer auto-decline/accept lowered by the same %.` : ''));
       setReview(null);
       setSelected(new Set());
     } catch (err) {
@@ -347,6 +349,11 @@ function ReviewModal({ changes, demo, pushing, onConfirm, onClose }) {
           {up} up · {changes.length - up} down · net list value {totalDelta >= 0 ? '+' : ''}{money(totalDelta)}
           {flagged > 0 && <span className="accent-amber"> · {flagged} flagged</span>}
         </div>
+        {!demo && changes.length - up > 0 && (
+          <div className="ink-faint" style={{ fontSize: '0.7rem', marginBottom: 10 }}>
+            If a listing's Best Offer auto-decline or auto-accept amount blocks a lower price, CardDesk lowers it by the same % so your offer rules stay the same.
+          </div>
+        )}
         <div className="scrollable" style={{ flex: 1, border: '1px solid #2a2a36' }}>
           {changes.map(c => (
             <div key={c.itemId} className="grid-row" style={{ gridTemplateColumns: '1fr 80px 20px 80px' }}>
