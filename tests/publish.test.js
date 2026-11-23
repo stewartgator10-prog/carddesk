@@ -132,6 +132,25 @@ test('photo upload sends the XML part then the image bytes', async () => {
   assert.equal(url, 'https://i.ebayimg.com/x.jpg');
 });
 
+test('photo upload: eBay copies the photo from a private link first; falls back to sending the file; errors carry eBay\'s reason', async () => {
+  const ok = (u) => new Response(`<UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>${u}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`);
+  const sent = [];
+  const viaLink = await uploadPicture({ token: 't', url: 'https://x.supabase.co/sign/a.jpg?token=1&x=2', imageBytes: () => { throw new Error('not needed'); }, name: 'n',
+    fetchImpl: async (_u, init) => { sent.push(init.headers['Content-Type']); assert.match(init.body, /<ExternalPictureURL>https:\/\/x\.supabase\.co\/sign\/a\.jpg\?token=1&amp;x=2<\/ExternalPictureURL>/); return ok('https://i.ebayimg.com/a.jpg'); } });
+  assert.equal(viaLink, 'https://i.ebayimg.com/a.jpg');
+  assert.deepEqual(sent, ['text/xml']);
+
+  const fallback = await uploadPicture({ token: 't', url: 'https://x/a.jpg', imageBytes: async () => Buffer.from('jpeg'), name: 'n',
+    fetchImpl: async (_u, init) => (init.headers['Content-Type'] === 'text/xml'
+      ? new Response('<UploadSiteHostedPicturesResponse><Ack>Failure</Ack><Errors><LongMessage>Could not fetch the picture.</LongMessage><SeverityCode>Error</SeverityCode></Errors></UploadSiteHostedPicturesResponse>')
+      : ok('https://i.ebayimg.com/b.jpg')) });
+  assert.equal(fallback, 'https://i.ebayimg.com/b.jpg');
+
+  await assert.rejects(uploadPicture({ token: 't', url: 'https://x/a.jpg', imageBytes: Buffer.from('jpeg'), name: 'n',
+    fetchImpl: async () => new Response('<html><body>Not Found</body></html>', { status: 404 }) }),
+  /from link HTTP 404: Not Found \| as a file HTTP 404: Not Found/);
+});
+
 function publishDb(item, moreFiles = {}) {
   return fakeDb({
     snap_items: [item], inventory: [], ebay_listings: [], settings: [],

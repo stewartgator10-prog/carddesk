@@ -289,23 +289,50 @@ export function pictureUploadBody(imageBytes, name, boundary = `----cd${crypto.r
   return { body: Buffer.concat([head, Buffer.from(imageBytes), Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')]), boundary };
 }
 
-export async function uploadPicture({ token, imageBytes, name, fetchImpl = fetch }) {
-  const { body, boundary } = pictureUploadBody(imageBytes, name);
-  const res = await fetchImpl('https://api.ebay.com/ws/api.dll', {
-    method: 'POST',
-    headers: {
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures', 'X-EBAY-API-SITEID': '0',
-      'X-EBAY-API-COMPATIBILITY-LEVEL': '1355', 'X-EBAY-API-IAF-TOKEN': token,
-    },
-    body,
-  });
-  const xmlText = await res.text();
-  if (!res.ok) throw new Error(`Photo upload failed (HTTP ${res.status})`);
-  const { r, errors } = responseOf(xmlText, 'UploadSiteHostedPictures');
-  const url = text(r.SiteHostedPictureDetails?.FullURL);
-  if (errors.length || !url) throw new Error(`Photo upload failed: ${errors.join('; ') || 'no URL returned'}`);
-  return url;
+const UPLOAD_HEADERS = (token) => ({
+  'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures', 'X-EBAY-API-SITEID': '0',
+  'X-EBAY-API-COMPATIBILITY-LEVEL': '1355', 'X-EBAY-API-IAF-TOKEN': token,
+});
+
+// eBay's own reason, so a failure says more than an HTTP number.
+function uploadResult(status, xmlText) {
+  let parsed = null;
+  try { parsed = responseOf(xmlText, 'UploadSiteHostedPictures'); } catch { /* not eBay XML */ }
+  const url = parsed ? text(parsed.r.SiteHostedPictureDetails?.FullURL) : null;
+  if (status >= 200 && status < 300 && url && !parsed.errors.length) return { url };
+  const why = parsed?.errors.join('; ') || String(xmlText || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) || 'no details';
+  return { error: `HTTP ${status}: ${why}` };
+}
+
+// Puts one photo on eBay's picture servers and returns its eBay URL.
+//   url:        a short-lived private link eBay downloads the photo from (a plain XML call, like every other eBay call here)
+//   imageBytes: the photo itself, sent as a file upload; used when there is no link or eBay can't fetch it
+export async function uploadPicture({ token, imageBytes, url, name, fetchImpl = fetch }) {
+  const tried = [];
+  if (url) {
+    const xml = wrap('UploadSiteHostedPictures', `<PictureName>${esc(name)}</PictureName><PictureSet>Supersize</PictureSet><ExternalPictureURL>${esc(url)}</ExternalPictureURL>`);
+    const res = await fetchImpl('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'Content-Type': 'text/xml', ...UPLOAD_HEADERS(token) }, body: xml });
+    const r = uploadResult(res.status, await res.text());
+    if (r.url) return r.url;
+    tried.push(`from link ${r.error}`);
+  }
+  const bytes = typeof imageBytes === 'function' ? await imageBytes() : imageBytes;
+  if (bytes) {
+    const { body, boundary } = pictureUploadBody(bytes, name);
+    const res = await fetchImpl('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, ...UPLOAD_HEADERS(token) }, body });
+    const r = uploadResult(res.status, await res.text());
+    if (r.url) return r.url;
+    tried.push(`as a file ${r.error}`);
+  }
+  throw new Error(`Photo upload to eBay failed (${tried.join(' | ') || 'no photo'})`);
+}
+
+// A private link to one of the seller's photos, valid for 15 minutes: long enough for eBay to copy it.
+async function photoLink(db, path) {
+  const bucket = db.storage.from('snap-photos');
+  if (typeof bucket.createSignedUrl !== 'function') return null;
+  const { data, error } = await bucket.createSignedUrl(path, 900);
+  return error ? null : data?.signedUrl || null;
 }
 
 // ---------- check and publish ----------
@@ -343,7 +370,7 @@ export async function checkSnapItem({ db, userId, token, item, settings, call = 
       urls = [];
       for (let i = 0; i < paths.length; i += 4) {
         urls.push(...await Promise.all(paths.slice(i, i + 4).map(async (p, j) =>
-          uploadPicture({ token, imageBytes: await photoBytes(db, p), name: `${snapSku(item.id)}-${i + j + 1}`, fetchImpl }))));
+          uploadPicture({ token, url: await photoLink(db, p), imageBytes: () => photoBytes(db, p), name: `${snapSku(item.id)}-${i + j + 1}`, fetchImpl }))));
       }
     }
     const sku = item.sku || snapSku(item.id);
