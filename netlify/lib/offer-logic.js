@@ -52,4 +52,5 @@ export const OFFER_FLAG_LABELS = {
   graded: 'Graded slab',
   ebay_median: 'Priced from eBay listings',
   name_only_match: 'Set or number not confirmed',
+  multiple_versions: 'Several versions or editions: check which one',
 };

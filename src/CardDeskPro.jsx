@@ -40,7 +40,7 @@ const DEFAULT_SETTINGS = {
   ...OFFER_DEFAULTS, // Buy offers: bulk cutoff and flat price, mid/high % of market
 };
 
-const GAMES = ['Pokémon', 'MTG'];
+const GAMES = ['Pokémon', 'MTG', 'Yu-Gi-Oh!', 'One Piece', 'Lorcana', 'Other'];
 const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG', 'PSA 10', 'PSA 9', 'PSA 8', 'PSA 7', 'BGS 10', 'BGS 9.5', 'BGS 9', 'CGC 10', 'CGC 9.5', 'CGC 9', 'SGC 10', 'SGC 9'];
 // Keeps an unusual detected grade (e.g. PSA 6) selectable instead of silently showing the first option.
 const conditionOptions = (current) => (current && !CONDITIONS.includes(current) ? [...CONDITIONS, current] : CONDITIONS);

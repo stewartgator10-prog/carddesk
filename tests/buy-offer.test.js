@@ -10,7 +10,7 @@ import { checkSnapItem } from '../netlify/lib/ebay-listing.js';
 import { fakeDb } from './fake-db.js';
 
 const U = 'u1';
-const read = (over = {}) => ({ is_trading_card: true, game: 'pokemon', card_name: 'Fuecoco', collector_number: '035/193', set_name: null, set_code: null, language: 'English', finish: 'reverse_holo', variant: null, graded: false, condition_guess: 'unknown', possible_misprint: false, misprint_notes: null, confidence: 0.95, notes: null, ...over });
+const read = (over = {}) => ({ is_trading_card: true, game: 'pokemon', card_name: 'Fuecoco', collector_number: '035/193', set_name: null, set_code: null, language: 'English', finish: 'reverse_holo', variant: null, rarity: null, game_name: null, graded: false, condition_guess: 'unknown', possible_misprint: false, misprint_notes: null, confidence: 0.95, notes: null, ...over });
 
 test('tiered offers: flat bulk, mid %, high %, never more than market, total rounded down', () => {
   assert.equal(offerFor(0.27), 0.05);

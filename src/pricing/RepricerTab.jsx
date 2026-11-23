@@ -266,7 +266,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
           </div>
         )}
         <div className="ink-faint" style={{ padding: '12px 24px', fontSize: '0.7rem', borderTop: '1px solid var(--line-soft)' }}>
-          mkt = TCGplayer market price for the exact card (English Pokémon and Magic). eBay = cheapest comparable Buy It Now from other sellers, price + their shipping
+          mkt = TCGplayer market price for the exact card (English Pokémon, Magic, Yu-Gi-Oh!, One Piece and Lorcana). eBay = cheapest comparable Buy It Now from other sellers, price + their shipping
           (same card, number, language, graded or raw); hover for the listings. Both refresh nightly. sold = your <button className="btn-icon" style={{ padding: 0, textDecoration: 'underline', color: 'inherit', fontSize: 'inherit' }} onClick={onGoToComps}>Sold Comps</button> log. Floor = cost + min profit + shipping after eBay fees. Net = what you keep after fees and shipping, before cost.
         </div>
       </section>

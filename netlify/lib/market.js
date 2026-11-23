@@ -5,6 +5,7 @@
 //   3. live eBay competition: cheapest comparable Buy It Now listings from other sellers
 // Refreshed nightly and on demand; each run stops at a time limit and the next run continues.
 import { lookupCard, splitNumber, normName } from './card-catalog.js';
+import { CATALOG_GAMES } from './snap-logic.js';
 import { browseSearch } from './ebay-browse.js';
 import { parseTitles, TITLE_MODEL, TITLES_PER_CALL } from './title-parse.js';
 import { usageRow, logUsage, checkBudget } from './ai-usage.js';
@@ -78,6 +79,15 @@ export function summarizeComps(list) {
   };
 }
 
+// Middle price (with shipping) of other sellers' Buy It Now listings for the same raw card.
+// Used when no catalog has a price: other games, other languages, printings the catalog is missing.
+export async function ebayMedianFor(read, { ownSeller = null, deps = {} } = {}) {
+  if (!read?.card_name) return null;
+  const raw = { ...read, graded: false, grader: null, grade: null };
+  const res = await (deps.browseSearch || browseSearch)({ q: compQuery(raw), limit: 50, fixedPriceOnly: true });
+  return summarizeComps(filterCompetitors(res.items, raw, ownSeller)).comp_median ?? null;
+}
+
 const isStale = (row, listing, now) => !row || row.title_snapshot !== listing.title || !row.parsed
   || !row.comp_at || now - Date.parse(row.comp_at) > STALE_MS;
 
@@ -138,7 +148,7 @@ export async function refreshMarket({ db, userId, itemIds = null, force = false,
       Object.assign(row, { comp_at: new Date().toISOString(), comp_count: 0, comp_items: [], comp_low: null, comp_median: null, error: 'Not a single card' });
     } else {
       try {
-        if (['pokemon', 'mtg'].includes(parsed.game) && /^english$/i.test(parsed.language || 'English')) {
+        if (CATALOG_GAMES.includes(parsed.game) && /^english$/i.test(parsed.language || 'English')) {
           const cat = await (deps.lookupCard || lookupCard)(parsed);
           Object.assign(row, {
             catalog_source: cat?.source ?? null, catalog_id: cat?.id ?? null, catalog_name: cat?.name ?? null, catalog_set: cat?.setName ?? null,

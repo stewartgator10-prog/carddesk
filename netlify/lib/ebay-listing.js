@@ -9,7 +9,8 @@
 import crypto from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { tradingCall } from './trading-price.js';
-import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths } from './snap-logic.js';
+import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths, LISTABLE_GAMES, GAME_LABELS } from './snap-logic.js';
+import { getAppToken } from './ebay-browse.js';
 
 export const CCG_CATEGORY = '183454'; // CCG Individual Cards (Pokémon, Magic, ...)
 export const UNGRADED_CONDITION = '4000';
@@ -110,7 +111,7 @@ export function conditionValuesFromPolicy(policyJson, categoryId = CCG_CATEGORY)
   return Object.keys(out).length >= 4 ? { values: out, source: 'ebay' } : { values: { ...FALLBACK_CONDITION_VALUES }, source: 'fallback' };
 }
 
-export async function learnTemplates({ db, userId, token, call = tradingCall, fetchImpl = fetch }) {
+export async function learnTemplates({ db, userId, token, call = tradingCall, fetchImpl = fetch, appToken = getAppToken }) {
   const { data: listings, error } = await db.from('ebay_listings')
     .select('item_id, title, status, listing_type, start_time, raw').eq('user_id', userId).eq('status', 'Active');
   if (error) throw new Error(error.message);
@@ -132,6 +133,14 @@ export async function learnTemplates({ db, userId, token, call = tradingCall, fe
   } catch {
     out.conditions = { values: { ...FALLBACK_CONDITION_VALUES }, source: 'fallback' };
   }
+  // eBay's own names for each game ("Yu-Gi-Oh! TCG", "Disney Lorcana"...), so buyers filtering by game find the listing.
+  try {
+    const res = await fetchImpl(`https://api.ebay.com/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category?category_id=${CCG_CATEGORY}`,
+      { headers: { Authorization: `Bearer ${await appToken(fetchImpl)}`, Accept: 'application/json' } });
+    out.gameValues = gameValuesFromAspects(res.ok ? await res.json() : null);
+  } catch {
+    out.gameValues = null;
+  }
   const { error: upErr } = await db.from('ebay_accounts').update({ listing_templates: out }).eq('user_id', userId);
   if (upErr) throw new Error(upErr.message);
   return out;
@@ -140,20 +149,49 @@ export async function learnTemplates({ db, userId, token, call = tradingCall, fe
 // ---------- building the listing ----------
 const STATIC_SPECIFICS = /^(game|manufacturer|card size|country\/region of manufacture|country of manufacture|original\/licensed reprint|material|autographed|graded|vintage)$/i;
 const FINISH = { reverse_holo: 'Reverse Holo', holo: 'Holo', foil: 'Foil', normal: 'Regular' };
-const GAME_NAME = { pokemon: 'Pokémon TCG', mtg: 'Magic: The Gathering' };
+// Used when eBay's own list of game names hasn't been learned (or doesn't have the game).
+const GAME_NAME = { pokemon: 'Pokémon TCG', mtg: 'Magic: The Gathering', yugioh: 'Yu-Gi-Oh! TCG', one_piece: 'One Piece Card Game', lorcana: 'Disney Lorcana' };
+const GAME_MATCH = { pokemon: /pok[eé]mon/i, mtg: /magic.*gathering/i, yugioh: /yu-?gi-?oh/i, one_piece: /one piece/i, lorcana: /lorcana/i };
+const MANUFACTURER = { yugioh: 'Konami', one_piece: 'Bandai', lorcana: 'Ravensburger' };
 
-export function buildSpecifics(item, tpl) {
+export function gameValuesFromAspects(json) {
+  const game = (json?.aspects || []).find((a) => /^game$/i.test(a.localizedAspectName || ''));
+  const values = (game?.aspectValues || []).map((v) => v.localizedValue).filter(Boolean);
+  return values.length ? values : null;
+}
+
+// The value for eBay's required "Game" detail. Prefers eBay's own wording when it was learned.
+export function gameSpecific(item, templates) {
+  const known = templates?.gameValues || [];
+  const typed = item.game === 'other' ? String(item.extraction?.game_name || '').trim() : '';
+  if (item.game === 'other') {
+    if (!typed) return null;
+    const words = typed.toLowerCase().replace(/\b(card game|tcg|ccg|trading card game)\b/g, '').trim();
+    return known.find((v) => v.toLowerCase() === typed.toLowerCase()) || (words && known.find((v) => v.toLowerCase().includes(words))) || typed;
+  }
+  return known.find((v) => GAME_MATCH[item.game]?.test(v)) || GAME_NAME[item.game] || null;
+}
+
+// tplGame is the game of the listing the setup was copied from. When the card is a different game,
+// that listing's Game and Manufacturer don't apply and are replaced.
+export function buildSpecifics(item, tpl, { tplGame = item.game, templates = null } = {}) {
+  const foreign = tplGame !== item.game;
   const want = new Map();
-  for (const s of tpl?.itemSpecifics || []) if (STATIC_SPECIFICS.test(s.name) && s.values.length) want.set(s.name, s.values);
+  for (const s of tpl?.itemSpecifics || []) {
+    if (!STATIC_SPECIFICS.test(s.name) || !s.values.length) continue;
+    if (foreign && /^(game|manufacturer)$/i.test(s.name)) continue;
+    want.set(s.name, s.values);
+  }
   const names = new Set((tpl?.itemSpecifics || []).map((s) => s.name.toLowerCase()));
   const setIf = (name, value, always = false) => { if (value && (always || names.has(name.toLowerCase()))) want.set(name, [String(value)]); };
-  if (![...want.keys()].some((k) => /^game$/i.test(k))) want.set('Game', [GAME_NAME[item.game] || 'Pokémon TCG']);
+  if (![...want.keys()].some((k) => /^game$/i.test(k))) want.set('Game', [gameSpecific(item, templates) || GAME_NAME[item.game] || 'Pokémon TCG']);
+  if (foreign && MANUFACTURER[item.game]) want.set('Manufacturer', [MANUFACTURER[item.game]]);
   setIf('Card Name', item.card_name, true);
   setIf('Set', item.catalog_set || item.set_name, true);
   setIf('Card Number', item.catalog_number || item.collector_number, true);
   setIf('Language', item.language || 'English', true);
   setIf('Finish', FINISH[item.finish]);
-  setIf('Rarity', item.extraction?.rarity || item.rarity);
+  setIf('Rarity', item.rarity || item.extraction?.rarity, !['pokemon', 'mtg'].includes(item.game));
   if (item.game === 'pokemon') setIf('Character', item.card_name);
   return [...want.entries()].map(([name, values]) => ({ name, values }));
 }
@@ -161,7 +199,7 @@ export function buildSpecifics(item, tpl) {
 export function buildDescription(item, footer = '') {
   const rows = [
     ['Card', item.card_name], ['Set', item.catalog_set || item.set_name], ['Number', item.catalog_number || item.collector_number],
-    ['Finish', FINISH[item.finish]], ['Condition', { NM: 'Near Mint', LP: 'Lightly Played', MP: 'Moderately Played', HP: 'Heavily Played', DMG: 'Damaged' }[item.condition] || item.condition],
+    ['Rarity', ['pokemon', 'mtg'].includes(item.game) ? null : item.rarity], ['Finish', FINISH[item.finish]], ['Condition', { NM: 'Near Mint', LP: 'Lightly Played', MP: 'Moderately Played', HP: 'Heavily Played', DMG: 'Damaged' }[item.condition] || item.condition],
     ['Language', item.language],
   ].filter(([, v]) => v);
   const misprint = item.misprint_confirmed && item.misprint_notes ? `<p><b>Misprint:</b> ${esc(item.misprint_notes)}</p>` : '';
@@ -190,7 +228,8 @@ export const snapSku = (snapId) => `SNAP-${String(snapId).replace(/-/g, '').slic
 // What the check approved; publishing refuses if any of this changed since.
 export function listingSignature(item) {
   return crypto.createHash('sha256').update(JSON.stringify([item.title, Number(item.price), item.condition, item.finish, item.card_name,
-    item.catalog_set || item.set_name, item.catalog_number || item.collector_number, item.misprint_confirmed, item.ebay_picture_urls || []])).digest('hex').slice(0, 16);
+    item.catalog_set || item.set_name, item.catalog_number || item.collector_number, item.misprint_confirmed, item.ebay_picture_urls || [],
+    item.game || null, item.rarity || null, item.extraction?.game_name || null])).digest('hex').slice(0, 16);
 }
 
 export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
@@ -202,7 +241,8 @@ export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
   const ret = templates.policies?.returnProfile;
   const pay = templates.policies?.paymentProfile;
   const bo = bestOfferPrices(price, tpl.bestOffer);
-  const specifics = buildSpecifics(item, tpl);
+  const tplGame = templates?.[item.game] ? item.game : templates?.pokemon ? 'pokemon' : 'mtg';
+  const specifics = buildSpecifics(item, tpl, { tplGame, templates });
   return [
     '<Item>',
     `<Title>${esc(String(item.title).slice(0, 80))}</Title>`,
@@ -286,7 +326,9 @@ export async function loadTemplates(db, userId) {
 
 export async function checkSnapItem({ db, userId, token, item, settings, call = tradingCall, fetchImpl = fetch }) {
   if (item.status !== 'approved') throw Object.assign(new Error('Approve the card first.'), { status: 409 });
-  if (!['pokemon', 'mtg'].includes(item.game)) throw Object.assign(new Error('Only Pokémon and Magic cards can be listed in this version.'), { status: 409 });
+  if (item.game === 'sports') throw Object.assign(new Error('Sports cards use a different eBay category and can\'t be listed from here yet.'), { status: 409 });
+  if (!LISTABLE_GAMES.includes(item.game)) throw Object.assign(new Error('Choose the card\'s game before checking it with eBay.'), { status: 409 });
+  if (item.game === 'other' && !String(item.extraction?.game_name || '').trim()) throw Object.assign(new Error('eBay needs the game\'s name. Type it in the "Game name" box on the card.'), { status: 409 });
   if (!(Number(item.price) >= 0.99) || !item.title) throw Object.assign(new Error('The card needs a title and a price of at least $0.99.'), { status: 409 });
   if (item.photo_crop) throw Object.assign(new Error('This card only has a binder-page photo. Replace it with a photo of the card itself first.'), { status: 409 });
   const { templates } = await loadTemplates(db, userId);
@@ -349,7 +391,7 @@ export async function publishSnapItem({ db, userId, token, item, settings, call 
     publish_check: { ...check, listingFees: fees } }).eq('id', item.id).eq('user_id', userId));
   // The card is now stock with its cost, tied to the listing so its sale matches automatically.
   await must(db.from('inventory').insert({
-    id: crypto.randomUUID(), user_id: userId, card_name: item.title, game: item.game === 'mtg' ? 'MTG' : 'Pokémon',
+    id: crypto.randomUUID(), user_id: userId, card_name: item.title, game: item.game === 'mtg' ? 'MTG' : item.game === 'other' ? (item.extraction?.game_name || 'Other') : (GAME_LABELS[item.game] || 'Pokémon'),
     set_name: item.catalog_set || item.set_name || null, condition: item.condition || 'NM', status: 'In Stock',
     current_fmv: Number(item.price), ebay_item_id: itemId, sku: item.sku, acquired_at: now.slice(0, 10),
     cost_basis: item.cost_basis ?? null, cost_source: item.cost_basis != null ? (item.cost_source || 'entered') : null, purchase_id: item.purchase_id || null,
