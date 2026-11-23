@@ -132,23 +132,40 @@ test('photo upload sends the XML part then the image bytes', async () => {
   assert.equal(url, 'https://i.ebayimg.com/x.jpg');
 });
 
-test('photo upload: eBay copies the photo from a private link first; falls back to sending the file; errors carry eBay\'s reason', async () => {
-  const ok = (u) => new Response(`<UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>${u}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`);
-  const sent = [];
-  const viaLink = await uploadPicture({ token: 't', url: 'https://x.supabase.co/sign/a.jpg?token=1&x=2', imageBytes: () => { throw new Error('not needed'); }, name: 'n',
-    fetchImpl: async (_u, init) => { sent.push(init.headers['Content-Type']); assert.match(init.body, /<ExternalPictureURL>https:\/\/x\.supabase\.co\/sign\/a\.jpg\?token=1&amp;x=2<\/ExternalPictureURL>/); return ok('https://i.ebayimg.com/a.jpg'); } });
-  assert.equal(viaLink, 'https://i.ebayimg.com/a.jpg');
-  assert.deepEqual(sent, ['text/xml']);
+test('photo upload: eBay Media API from a private link first, then as a file, then the older Trading call; errors list every reason', async () => {
+  const gone = () => new Response(JSON.stringify({ errors: [{ message: 'Resource not found' }] }), { status: 404 });
+  const tradingOk = (u) => new Response(`<UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>${u}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`);
+  const created = (id) => new Response('', { status: 201, headers: { Location: `https://apim.ebay.com/commerce/media/v1_beta/image/${id}` } });
 
-  const fallback = await uploadPicture({ token: 't', url: 'https://x/a.jpg', imageBytes: async () => Buffer.from('jpeg'), name: 'n',
-    fetchImpl: async (_u, init) => (init.headers['Content-Type'] === 'text/xml'
-      ? new Response('<UploadSiteHostedPicturesResponse><Ack>Failure</Ack><Errors><LongMessage>Could not fetch the picture.</LongMessage><SeverityCode>Error</SeverityCode></Errors></UploadSiteHostedPicturesResponse>')
-      : ok('https://i.ebayimg.com/b.jpg')) });
-  assert.equal(fallback, 'https://i.ebayimg.com/b.jpg');
+  // Media from the link: 201 + Location, then reading the image gives its eBay URL.
+  const seen = [];
+  const viaMedia = await uploadPicture({ token: 'tok', url: 'https://x.supabase.co/sign/a.jpg?token=1', imageBytes: () => { throw new Error('not needed'); }, name: 'n',
+    fetchImpl: async (u, init = {}) => {
+      seen.push(`${init.method || 'GET'} ${u.replace('https://apim.ebay.com/commerce/media/v1_beta', '')}`);
+      assert.equal(init.headers.Authorization, 'Bearer tok');
+      if (u.endsWith('/create_image_from_url')) { assert.deepEqual(JSON.parse(init.body), { imageUrl: 'https://x.supabase.co/sign/a.jpg?token=1' }); return created('IMG1'); }
+      return new Response(JSON.stringify({ imageUrl: 'https://i.ebayimg.com/images/g/IMG1/s-l1600.jpg' }));
+    } });
+  assert.equal(viaMedia, 'https://i.ebayimg.com/images/g/IMG1/s-l1600.jpg');
+  assert.deepEqual(seen, ['POST /image/create_image_from_url', 'GET /image/IMG1']);
+
+  // eBay can't fetch the link: the file goes to Media instead.
+  const viaFile = await uploadPicture({ token: 't', url: 'https://x/a.jpg', imageBytes: async () => Buffer.from('jpeg'), name: 'n',
+    fetchImpl: async (u, init = {}) => {
+      if (u.endsWith('/create_image_from_url')) return new Response(JSON.stringify({ errors: [{ longMessage: 'Could not download the image.' }] }), { status: 400 });
+      if (u.endsWith('/create_image_from_file')) { assert.ok(init.body instanceof FormData); return new Response(JSON.stringify({ imageUrl: 'https://i.ebayimg.com/f.jpg' }), { status: 201 }); }
+      throw new Error(`unexpected ${u}`);
+    } });
+  assert.equal(viaFile, 'https://i.ebayimg.com/f.jpg');
+
+  // Media unavailable: the older Trading call is still tried.
+  const viaTrading = await uploadPicture({ token: 't', url: 'https://x/a.jpg', imageBytes: Buffer.from('jpeg'), name: 'n',
+    fetchImpl: async (u) => (u.includes('apim.ebay.com') ? gone() : tradingOk('https://i.ebayimg.com/t.jpg')) });
+  assert.equal(viaTrading, 'https://i.ebayimg.com/t.jpg');
 
   await assert.rejects(uploadPicture({ token: 't', url: 'https://x/a.jpg', imageBytes: Buffer.from('jpeg'), name: 'n',
-    fetchImpl: async () => new Response('<html><body>Not Found</body></html>', { status: 404 }) }),
-  /from link HTTP 404: Not Found \| as a file HTTP 404: Not Found/);
+    fetchImpl: async (u) => (u.includes('apim.ebay.com') ? gone() : new Response('Resource not found', { status: 404 })) }),
+  /media link HTTP 404: Resource not found \| media file HTTP 404: Resource not found \| from link HTTP 404: Resource not found \| as a file HTTP 404: Resource not found/);
 });
 
 function publishDb(item, moreFiles = {}) {
@@ -236,7 +253,8 @@ test('a listing can carry several photos: main first, extras in order, capped, a
 
   const db = publishDb(card({ back_photo_path: null, extra_photo_paths: extras }), files);
   const uploaded = [];
-  const fetchImpl = async (_url, init) => {
+  const fetchImpl = async (url, init) => {
+    if (String(url).includes('apim.ebay.com')) return new Response('{}', { status: 404 });
     const name = /filename="([^"]+)"/.exec(init.body.toString('latin1'))[1];
     uploaded.push(name);
     return new Response(`<UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>https://i.ebayimg.com/${name}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`);

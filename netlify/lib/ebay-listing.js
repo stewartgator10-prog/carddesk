@@ -304,11 +304,66 @@ function uploadResult(status, xmlText) {
   return { error: `HTTP ${status}: ${why}` };
 }
 
-// Puts one photo on eBay's picture servers and returns its eBay URL.
-//   url:        a short-lived private link eBay downloads the photo from (a plain XML call, like every other eBay call here)
-//   imageBytes: the photo itself, sent as a file upload; used when there is no link or eBay can't fetch it
-export async function uploadPicture({ token, imageBytes, url, name, fetchImpl = fetch }) {
+// ---------- eBay Media API (commerce/media): the current way to put a photo on eBay ----------
+// The old Trading call (UploadSiteHostedPictures) answers 404 "Resource not found" for this account's
+// OAuth token, so photos go through the Media API first. It needs the sell.inventory scope, which the
+// seller already granted. The eBay picture URL it returns works in a Trading listing.
+const MEDIA = 'https://apim.ebay.com/commerce/media/v1_beta';
+
+async function mediaError(res) {
+  const t = await res.text().catch(() => '');
+  let msg = '';
+  try { const j = JSON.parse(t); msg = (j.errors || []).map((e) => e.longMessage || e.message).filter(Boolean).join('; '); } catch { /* not JSON */ }
+  return `HTTP ${res.status}: ${(msg || t.replace(/\s+/g, ' ').trim()).slice(0, 160) || 'no details'}`;
+}
+
+// Media answers 201 with a Location header pointing at the new image; reading it gives the eBay URL.
+async function mediaImageUrl(res, token, fetchImpl) {
+  const body = await res.text().catch(() => '');
+  try { const j = JSON.parse(body); if (j.imageUrl) return j.imageUrl; } catch { /* empty body */ }
+  const loc = res.headers.get('location');
+  if (!loc) throw new Error('eBay did not say where the new photo is');
+  const got = await fetchImpl(loc.startsWith('http') ? loc : `${MEDIA}/image/${loc.split('/').pop()}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+  if (!got.ok) throw new Error(await mediaError(got));
+  const j = await got.json();
+  if (!j.imageUrl) throw new Error('eBay returned no picture URL');
+  return j.imageUrl;
+}
+
+export async function uploadPictureMedia({ token, url, imageBytes, name, fetchImpl = fetch }) {
   const tried = [];
+  if (url) {
+    const res = await fetchImpl(`${MEDIA}/image/create_image_from_url`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ imageUrl: url }),
+    });
+    if (res.status === 201 || res.ok) {
+      try { return await mediaImageUrl(res, token, fetchImpl); } catch (e) { tried.push(`media link ${e.message}`); }
+    } else tried.push(`media link ${await mediaError(res)}`);
+  }
+  const bytes = typeof imageBytes === 'function' ? await imageBytes() : imageBytes;
+  if (bytes) {
+    const form = new FormData();
+    form.append('image', new Blob([bytes], { type: 'image/jpeg' }), `${name}.jpg`);
+    const res = await fetchImpl(`${MEDIA}/image/create_image_from_file`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, body: form });
+    if (res.status === 201 || res.ok) {
+      try { return await mediaImageUrl(res, token, fetchImpl); } catch (e) { tried.push(`media file ${e.message}`); }
+    } else tried.push(`media file ${await mediaError(res)}`);
+  }
+  const err = new Error(tried.join(' | ') || 'no photo');
+  err.tried = tried;
+  throw err;
+}
+
+// Puts one photo on eBay's picture servers and returns its eBay URL: the Media API first, then the
+// older Trading call (by link, then as a file). A failure lists what eBay said at every step.
+export async function uploadPicture({ token, imageBytes, url, name, fetchImpl = fetch }) {
+  let bytes = null;
+  const getBytes = async () => { if (bytes == null) bytes = typeof imageBytes === 'function' ? await imageBytes() : imageBytes; return bytes; };
+  const tried = [];
+  try {
+    return await uploadPictureMedia({ token, url, imageBytes: imageBytes ? getBytes : null, name, fetchImpl });
+  } catch (e) { tried.push(...(e.tried || [e.message])); }
   if (url) {
     const xml = wrap('UploadSiteHostedPictures', `<PictureName>${esc(name)}</PictureName><PictureSet>Supersize</PictureSet><ExternalPictureURL>${esc(url)}</ExternalPictureURL>`);
     const res = await fetchImpl('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'Content-Type': 'text/xml', ...UPLOAD_HEADERS(token) }, body: xml });
@@ -316,9 +371,9 @@ export async function uploadPicture({ token, imageBytes, url, name, fetchImpl = 
     if (r.url) return r.url;
     tried.push(`from link ${r.error}`);
   }
-  const bytes = typeof imageBytes === 'function' ? await imageBytes() : imageBytes;
-  if (bytes) {
-    const { body, boundary } = pictureUploadBody(bytes, name);
+  const b = imageBytes ? await getBytes() : null;
+  if (b) {
+    const { body, boundary } = pictureUploadBody(b, name);
     const res = await fetchImpl('https://api.ebay.com/ws/api.dll', { method: 'POST', headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, ...UPLOAD_HEADERS(token) }, body });
     const r = uploadResult(res.status, await res.text());
     if (r.url) return r.url;
