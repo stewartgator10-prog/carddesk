@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, FlaskConical, DollarSign, Settings as Cog, Image as ImageIcon, Store } from 'lucide-react';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
+import CropImg from './lib/CropImg.jsx';
 import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
@@ -16,8 +17,8 @@ const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'c
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 const STATUS = {
-  uploaded: ['QUEUED', '#8a8a96'], identifying: ['READING…', '#fbbf24'], ready: ['READY', '#4ade80'],
-  needs_review: ['CHECK', '#fbbf24'], failed: ['FAILED', '#ff6b6b'], approved: ['APPROVED', '#60a5fa'], listed: ['ON EBAY', '#4ade80'],
+  uploaded: ['QUEUED', 'var(--ink-dim)'], identifying: ['READING…', 'var(--warn)'], ready: ['READY', 'var(--good)'],
+  needs_review: ['CHECK', 'var(--warn)'], failed: ['FAILED', 'var(--bad)'], approved: ['APPROVED', 'var(--info)'], listed: ['ON EBAY', 'var(--good)'],
 };
 
 async function postJson(path, body) {
@@ -162,6 +163,20 @@ export default function SnapTab({ userId, settings, setSettings }) {
     } catch (e) { setMsg({ type: 'error', text: `Back photo failed: ${e.message}` }); }
   }
 
+  // Cards from a buy-offer binder page start with only part of the page photo; this swaps in a real one.
+  async function replacePhoto(item, file) {
+    try {
+      const blob = await resizeForUpload(file);
+      const path = `${userId}/${item.batch_id || 'snap'}/${item.id}-front-${Date.now()}.jpg`;
+      const up = await supabase.storage.from('snap-photos').upload(path, blob, { contentType: 'image/jpeg' });
+      if (up.error) throw new Error(up.error.message);
+      setPhotoUrls((u) => ({ ...u, [path]: URL.createObjectURL(blob) }));
+      const reasons = (item.review_reasons || []).filter((r) => r !== 'page_photo');
+      await save(item.id, { photo_path: path, photo_crop: null, review_reasons: reasons, ebay_picture_urls: null, publish_state: null, publish_check: null,
+        ...(item.status === 'needs_review' && !reasons.length ? { status: 'ready' } : {}) });
+    } catch (e) { setMsg({ type: 'error', text: `Photo failed: ${e.message}` }); }
+  }
+
   const [ebayBusy, setEbayBusy] = useState(null); // { label, done, total }
   async function ebayLoop(label, list, action) {
     setEbayBusy({ label, done: 0, total: list.length }); setMsg(null);
@@ -235,7 +250,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
   const budget = Number(s.aiMonthlyBudget) || 0;
 
   const tabBtn = (key, icon, label) => (
-    <button className="btn-ghost" onClick={() => setPanel(key)} style={{ padding: '8px 12px', fontSize: '0.75rem', display: 'inline-flex', gap: 6, alignItems: 'center', borderColor: panel === key ? '#ff4d4d' : undefined, color: panel === key ? '#ff4d4d' : undefined }}>{icon}{label}</button>
+    <button className="btn-ghost" onClick={() => setPanel(key)} style={{ padding: '8px 12px', fontSize: '0.75rem', display: 'inline-flex', gap: 6, alignItems: 'center', borderColor: panel === key ? 'var(--active)' : undefined, color: panel === key ? 'var(--active)' : undefined }}>{icon}{label}</button>
   );
 
   return (
@@ -263,14 +278,14 @@ export default function SnapTab({ userId, settings, setSettings }) {
         {tabBtn('settings', <Cog size={14} />, 'Settings')}
       </div>
 
-      {msg && <div style={{ padding: '10px 14px', border: `1px solid ${msg.type === 'error' ? '#f87171' : '#4ade80'}`, color: msg.type === 'error' ? '#f87171' : '#4ade80', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+      {msg && <div style={{ padding: '10px 14px', border: `1px solid ${msg.type === 'error' ? 'var(--bad)' : 'var(--good)'}`, color: msg.type === 'error' ? 'var(--bad)' : 'var(--good)', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
         <span>{msg.text}</span><button className="btn-icon" onClick={() => setMsg(null)}><X size={14} /></button></div>}
 
       {panel === 'queue' && (
         <>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`]].map(([k, l]) => (
-              <button key={k} className="btn-ghost" onClick={() => setFilter(k)} style={{ padding: '6px 10px', fontSize: '0.7rem', borderColor: filter === k ? '#ff4d4d' : undefined, color: filter === k ? '#ff4d4d' : undefined }}>{l}</button>
+              <button key={k} className="btn-ghost" onClick={() => setFilter(k)} style={{ padding: '6px 10px', fontSize: '0.7rem', borderColor: filter === k ? 'var(--active)' : undefined, color: filter === k ? 'var(--active)' : undefined }}>{l}</button>
             ))}
             <span style={{ flex: 1 }} />
             <button className="btn-ghost" onClick={loadItems} title="Reload" style={{ padding: '6px 10px' }}><RefreshCw size={14} /></button>
@@ -284,15 +299,15 @@ export default function SnapTab({ userId, settings, setSettings }) {
           {ebayBusy && <div className="accent-amber" style={{ fontSize: '0.8rem' }}><Loader size={12} className="spin" /> {ebayBusy.label}: {ebayBusy.done} of {ebayBusy.total}…</div>}
           {visible.length === 0 ? (
             <div className="bg-card ink-faint" style={{ padding: 48, textAlign: 'center' }}>
-              {items.length ? 'Nothing here.' : 'No cards yet. Tap SNAP CARDS to photograph a stack.'}
+              {items.length ? 'Nothing here.' : 'No cards yet. Tap "snap cards" to photograph a stack.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} backPhoto={photoUrls[it.back_photo_path]} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onBack={(f) => addBackPhoto(it, f)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} backPhoto={photoUrls[it.back_photo_path]} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onBack={(f) => addBackPhoto(it, f)} onReplace={(f) => replacePhoto(it, f)} />)}
             </div>
           )}
           <div className="ink-faint" style={{ fontSize: '0.7rem' }}>
-            Approved cards: CHECK uploads the photos and runs eBay's free listing check (nothing goes live). PUBLISH lists the cards that passed, using your learned listing setup (Snap settings).
+            Approved cards: "check" uploads the photos and runs eBay's free listing check (nothing goes live). "publish" lists the cards that passed, using your learned listing setup (Snap settings).
           </div>
         </>
       )}
@@ -304,11 +319,12 @@ export default function SnapTab({ userId, settings, setSettings }) {
   );
 }
 
-function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry, onBack }) {
+function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry, onBack, onReplace }) {
   const backInput = useRef(null);
+  const frontInput = useRef(null);
   const [d, setD] = useState(it);
   useEffect(() => { setD(it); }, [it]);
-  const [label, color] = STATUS[it.status] || [it.status, '#8a8a96'];
+  const [label, color] = STATUS[it.status] || [it.status, 'var(--ink-dim)'];
   const busy = it.status === 'identifying' || it.status === 'uploaded';
   const field = (k, v) => setD((x) => ({ ...x, [k]: v }));
   const commit = (patch) => onSave(it.id, patch);
@@ -322,10 +338,10 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
         <span className="ink-faint">{it.model ? (MODEL_LABELS[it.model] || it.model) : ''}{it.confidence != null ? ` · ${Math.round(it.confidence * 100)}% sure` : ''}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-        <div style={{ aspectRatio: '5 / 7', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {photo ? <img src={photo} alt="Your photo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <Loader size={14} className="spin ink-faint" />}
+        <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {photo ? (it.photo_crop ? <CropImg url={photo} box={it.photo_crop} alt="Your photo (from a binder page)" /> : <img src={photo} alt="Your photo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />) : <Loader size={14} className="spin ink-faint" />}
         </div>
-        <div style={{ aspectRatio: '5 / 7', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+        <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
           {it.catalog_image_url
             ? <img src={it.catalog_image_url} alt="Catalog match" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
             : <span className="ink-faint" style={{ fontSize: '0.7rem', textAlign: 'center', padding: 8 }}>{busy ? '' : 'No catalog match'}</span>}
@@ -335,6 +351,8 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
       {!busy && it.status !== 'listed' && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.7rem' }}>
           <input ref={backInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onBack(e.target.files[0]); e.target.value = ''; }} />
+          <input ref={frontInput} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files[0]) onReplace(e.target.files[0]); e.target.value = ''; }} />
+          {it.photo_crop && <button className="btn-primary" onClick={() => frontInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}><Camera size={12} /> Replace photo</button>}
           {it.back_photo_path && backPhoto && <img src={backPhoto} alt="Back" style={{ width: 28, height: 39, objectFit: 'cover' }} />}
           <button className="btn-ghost" onClick={() => backInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
             <Camera size={12} /> {it.back_photo_path ? 'Retake back' : 'Add back photo'}
@@ -346,14 +364,14 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
       {it.error && <div className="accent-red" style={{ fontSize: '0.75rem' }}>{it.error}</div>}
       {(it.review_reasons || []).length > 0 && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {it.review_reasons.map((r) => <span key={r} style={{ fontSize: '0.65rem', padding: '2px 6px', border: '1px solid #fbbf24', color: '#fbbf24' }}>{REVIEW_LABELS[r] || r}</span>)}
+          {it.review_reasons.map((r) => <span key={r} style={{ fontSize: '0.65rem', padding: '2px 6px', border: '1px solid var(--warn)', color: 'var(--warn)' }}>{REVIEW_LABELS[r] || r}</span>)}
         </div>
       )}
       {it.duplicate_item_id && <a className="ink-dim" style={{ fontSize: '0.7rem' }} href={`https://www.ebay.com/itm/${it.duplicate_item_id}`} target="_blank" rel="noreferrer">Your listing #{it.duplicate_item_id} <ExternalLink size={10} /></a>}
       {it.misprint_flag && (
-        <div style={{ fontSize: '0.75rem', padding: 6, border: '1px dashed #fbbf24' }}>
+        <div style={{ fontSize: '0.75rem', padding: 6, border: '1px dashed var(--warn)' }}>
           <div className="accent-amber"><AlertTriangle size={11} /> AI noticed: {it.misprint_notes || 'possible misprint'}</div>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center', textTransform: 'none', letterSpacing: 0, margin: '4px 0 0', color: '#e8e8ed' }}>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', textTransform: 'none', letterSpacing: 0, margin: '4px 0 0', color: 'var(--ink)' }}>
             <input type="checkbox" style={{ width: 'auto' }} checked={!!d.misprint_confirmed} onChange={(e) => { field('misprint_confirmed', e.target.checked); commit({ misprint_confirmed: e.target.checked }); }} />
             I checked it: it's a real misprint (adds it to the title)
           </label>
@@ -361,7 +379,7 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
       )}
 
       {it.status === 'listed' && (
-        <div style={{ fontSize: '0.8rem', padding: 8, border: '1px solid #4ade80' }}>
+        <div style={{ fontSize: '0.8rem', padding: 8, border: '1px solid var(--good)' }}>
           <div className="accent-green" style={{ fontWeight: 600 }}>{it.title}</div>
           <div className="ink-dim">{money(it.price)}{it.cost_basis != null ? ` · cost ${money(it.cost_basis)}` : ''} · listed {it.listed_at ? new Date(it.listed_at).toLocaleDateString() : ''}</div>
           {it.ebay_url && <a href={it.ebay_url} target="_blank" rel="noreferrer" className="accent-green" style={{ fontSize: '0.75rem' }}>View on eBay #{it.ebay_item_id} <ExternalLink size={10} /></a>}
@@ -390,7 +408,7 @@ function SnapCard({ it, photo, backPhoto, onSave, onApprove, onDiscard, onRetry,
             <span className="ink-faint">Cost $</span>
             <input className="bg-input" style={{ ...inp, width: 90 }} type="number" step="0.01" min="0" placeholder="paid" value={d.cost_basis ?? ''} onChange={(e) => field('cost_basis', e.target.value)}
               onBlur={() => { const none = d.cost_basis === '' || d.cost_basis == null; commit({ cost_basis: none ? null : Number(d.cost_basis), cost_source: none ? null : 'entered', purchase_id: null }); }} />
-            {it.cost_source === 'purchase' && <span style={{ fontSize: '0.65rem', color: '#60a5fa' }}>from purchase</span>}
+            {it.cost_source === 'purchase' && <span style={{ fontSize: '0.65rem', color: 'var(--info)' }}>from purchase</span>}
             {it.catalog_url && <a className="ink-faint" href={it.catalog_url} target="_blank" rel="noreferrer"><ExternalLink size={11} /></a>}
           </div>
         </div>
@@ -417,7 +435,7 @@ function PublishStatus({ it }) {
     return <div className="ink-faint" style={{ fontSize: '0.7rem' }}>{it.publish_error ? <span className="accent-red">{it.publish_error}</span> : 'Not checked with eBay yet.'}</div>;
   }
   return (
-    <div style={{ fontSize: '0.72rem', padding: 6, border: `1px solid ${c.ok ? '#4ade80' : '#f87171'}` }}>
+    <div style={{ fontSize: '0.72rem', padding: 6, border: `1px solid ${c.ok ? 'var(--good)' : 'var(--bad)'}` }}>
       {c.ok
         ? <div className="accent-green">Passed eBay's check · listing fee {money(c.fees?.total || 0)}{c.shippingProfile ? ` · ${c.shippingProfile.replace(/\s*\(\d+\)\s*$/, '')}` : ''}</div>
         : <div className="accent-red">eBay would reject this listing:</div>}
@@ -448,20 +466,20 @@ function FeePanel({ usage, budget, onReload }) {
 
   return (
     <section className="bg-card" style={{ padding: 0 }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 className="display-font" style={{ margin: 0, fontSize: '1.3rem' }}>API FEES · THIS MONTH</h2>
         <button className="btn-ghost" onClick={onReload} style={{ padding: '6px 10px' }}><RefreshCw size={14} /></button>
       </div>
       <div className="responsive-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: 16 }}>
         <div className="stat-box"><div className="ink-faint" style={{ fontSize: '0.7rem' }}>THIS MONTH</div><div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{fee(total)}</div><div className="ink-dim" style={{ fontSize: '0.7rem' }}>{budget ? `of ${money(budget)} budget` : 'no budget limit'}</div>
-          {usedPct != null && <div style={{ height: 4, background: '#2a2a36', marginTop: 6 }}><div style={{ height: 4, width: `${usedPct * 100}%`, background: usedPct >= 0.8 ? '#fbbf24' : '#4ade80' }} /></div>}</div>
+          {usedPct != null && <div style={{ height: 4, background: 'var(--line)', marginTop: 6 }}><div style={{ height: 4, width: `${usedPct * 100}%`, background: usedPct >= 0.8 ? 'var(--warn)' : 'var(--good)' }} /></div>}</div>
         <div className="stat-box"><div className="ink-faint" style={{ fontSize: '0.7rem' }}>TODAY</div><div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{fee(todaySpend)}</div></div>
         <div className="stat-box"><div className="ink-faint" style={{ fontSize: '0.7rem' }}>PER CARD IDENTIFIED</div><div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{fee(perCard)}</div><div className="ink-dim" style={{ fontSize: '0.7rem' }}>{ids.length} cards this month</div></div>
         <div className="stat-box"><div className="ink-faint" style={{ fontSize: '0.7rem' }}>ALL TIME</div><div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{fee(usage.allTime)}</div><div className="ink-dim" style={{ fontSize: '0.7rem' }}>{rows.length} calls this month</div></div>
       </div>
       <div className="responsive-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '0 16px 16px' }}>
         {[['model', 'By model'], ['purpose', 'By use']].map(([k, label]) => (
-          <div key={k} style={{ border: '1px solid #2a2a36' }}>
+          <div key={k} style={{ border: '1px solid var(--line)' }}>
             <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '8px 12px', letterSpacing: '0.1em' }}>{label.toUpperCase()}</div>
             {group(k).map(([name, g]) => (
               <div key={name} className="grid-row" style={{ gridTemplateColumns: '1fr 60px 80px', padding: '8px 12px' }}>
@@ -475,7 +493,7 @@ function FeePanel({ usage, budget, onReload }) {
           </div>
         ))}
       </div>
-      <div style={{ borderTop: '1px solid #2a2a36' }}>
+      <div style={{ borderTop: '1px solid var(--line)' }}>
         <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '10px 20px', letterSpacing: '0.1em' }}>RECENT CALLS</div>
         {rows.slice(0, 15).map((r, i) => (
           <div key={i} className="grid-row" style={{ gridTemplateColumns: '130px 1fr 70px 70px', fontSize: '0.75rem', padding: '6px 20px' }}>
@@ -486,7 +504,7 @@ function FeePanel({ usage, budget, onReload }) {
           </div>
         ))}
       </div>
-      <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '12px 20px', borderTop: '1px solid #2a2a36' }}>
+      <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '12px 20px', borderTop: '1px solid var(--line)' }}>
         Estimated from Anthropic's published per-token prices (Opus 5.5: ${MODEL_PRICES['claude-opus-5-5'].input}/${MODEL_PRICES['claude-opus-5-5'].output} per million input/output tokens; Haiku 5.5: ${MODEL_PRICES['claude-haiku-5-5'].input}/${MODEL_PRICES['claude-haiku-5-5'].output}). Your Anthropic Console invoice is the final number. Months are calendar months in UTC.
       </div>
     </section>
@@ -546,7 +564,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
 
   return (
     <section className="bg-card" style={{ padding: 0 }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 className="display-font" style={{ margin: 0, fontSize: '1.3rem' }}>MODEL TRIAL</h2>
           <div className="ink-dim" style={{ fontSize: '0.75rem' }}>Runs up to 30 of your own eBay listing photos through both models and checks each answer against your listing title.</div>
@@ -560,7 +578,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
         <>
           <div style={{ overflowX: 'auto' }}>
             <div style={{ minWidth: 760 }}>
-              <div className="grid-row" style={{ gridTemplateColumns: '170px repeat(5, 1fr) 90px 90px 70px 120px', fontSize: '0.65rem', letterSpacing: '0.08em', color: '#8a8a96' }}>
+              <div className="grid-row" style={{ gridTemplateColumns: '170px repeat(5, 1fr) 90px 90px 70px 120px', fontSize: '0.65rem', letterSpacing: '0.08em', color: 'var(--ink-dim)' }}>
                 <div>MODEL</div><div>FULLY RIGHT</div><div>NAME</div><div>NUMBER</div><div>SET</div><div>CATALOG</div><div style={{ textAlign: 'right' }}>PER CARD</div><div style={{ textAlign: 'right' }}>TOTAL</div><div style={{ textAlign: 'right' }}>TIME</div><div></div>
               </div>
               {summary.map((m) => (
@@ -578,16 +596,16 @@ function TrialPanel({ settings, setSettings, onUsage }) {
               ))}
             </div>
           </div>
-          <div className="ink-dim" style={{ fontSize: '0.75rem', padding: '10px 20px', borderTop: '1px solid #1f1f2a' }}>
+          <div className="ink-dim" style={{ fontSize: '0.75rem', padding: '10px 20px', borderTop: '1px solid var(--line-soft)' }}>
             Trial {trialId}. "Fully right" = card name and number both match your title (number only counts where the title has one).
             {medianRatio != null && <> Your listed prices are a median <strong>{medianRatio.toFixed(1)}×</strong> the catalog market price on these cards.</>}
           </div>
           {misses.length > 0 && (
-            <div style={{ borderTop: '1px solid #2a2a36' }}>
+            <div style={{ borderTop: '1px solid var(--line)' }}>
               <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '10px 20px', letterSpacing: '0.1em' }}>CARDS A MODEL GOT WRONG ({misses.length})</div>
               {misses.map((x, i) => (
                 <div key={i} className="grid-row" style={{ gridTemplateColumns: '48px 1.4fr 1fr 1fr', fontSize: '0.75rem', padding: '8px 20px' }}>
-                  <img src={x.image} alt="" style={{ width: 44, height: 60, objectFit: 'contain', background: '#0a0a0f' }} />
+                  <img src={x.image} alt="" style={{ width: 44, height: 60, objectFit: 'contain', background: 'var(--well)' }} />
                   <div>{x.title}</div>
                   {Object.keys(MODEL_LABELS).map((k) => {
                     const r = x[k];
@@ -641,7 +659,7 @@ function AiConnector() {
   const load = useCallback(async () => {
     const { data, error } = await supabase.auth.oauth.listGrants();
     if (error) { setErr(/not enabled|not found|404/i.test(error.message) ? 'Sign-in for AI apps is not switched on in Supabase yet (see the setup steps).' : error.message); setGrants([]); return; }
-    setGrants(data || []);
+    setGrants(Array.isArray(data) ? data : []);
   }, []);
   useEffect(() => { load(); }, [load]);
   async function revoke(g) {
@@ -650,7 +668,7 @@ function AiConnector() {
     if (error) setErr(error.message); else load();
   }
   return (
-    <div style={{ borderTop: '1px solid #2a2a36', paddingTop: 12, display: 'grid', gap: 10 }}>
+    <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12, display: 'grid', gap: 10 }}>
       <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>CLAUDE APP CONNECTOR</h3>
       <div className="ink-dim" style={{ fontSize: '0.75rem' }}>
         Let the Claude app review, price, approve, check and publish your snapped cards, and answer profit questions, by chatting.
@@ -665,7 +683,7 @@ function AiConnector() {
         <div className="ink-faint" style={{ letterSpacing: '0.1em', fontSize: '0.65rem', marginBottom: 4 }}>CONNECTED APPS</div>
         {grants === null ? <Loader size={13} className="spin ink-faint" /> : grants.length === 0 ? <div className="ink-faint">None connected.</div>
           : grants.map((g) => (
-            <div key={g.client?.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #1f1f2a' }}>
+            <div key={g.client?.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
               <div style={{ flex: 1 }}>{g.client?.name || 'App'}<div className="ink-faint" style={{ fontSize: '0.65rem' }}>since {new Date(g.granted_at).toLocaleDateString()}</div></div>
               <button className="btn-ghost" onClick={() => revoke(g)} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>Disconnect</button>
             </div>
@@ -697,7 +715,7 @@ function ListingSetup({ s, set }) {
   const row = (k, v) => v ? <div><span className="ink-faint">{k}: </span>{v}</div> : null;
   const tpl = t?.pokemon || t?.mtg;
   return (
-    <div style={{ borderTop: '1px solid #2a2a36', paddingTop: 12, display: 'grid', gap: 10 }}>
+    <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12, display: 'grid', gap: 10 }}>
       <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>EBAY LISTING SETUP</h3>
       <div className="ink-dim" style={{ fontSize: '0.75rem' }}>New listings copy the setup of your own newest Pokémon and Magic listings: category, condition codes, item details, ship-from location, return and payment policies, and Best Offer %.</div>
       {state.loading ? <Loader size={14} className="spin ink-faint" /> : !state.connected ? (
@@ -705,7 +723,7 @@ function ListingSetup({ s, set }) {
       ) : (
         <>
           {t ? (
-            <div style={{ fontSize: '0.75rem', display: 'grid', gap: 3, padding: 10, border: '1px solid #2a2a36' }}>
+            <div style={{ fontSize: '0.75rem', display: 'grid', gap: 3, padding: 10, border: '1px solid var(--line)' }}>
               {row('Learned', `${new Date(t.learnedAt).toLocaleString()} from ${[t.pokemon && 'a Pokémon listing', t.mtg && 'a Magic listing'].filter(Boolean).join(' and ')}`)}
               {row('Category', tpl?.categoryId)}
               {row('Condition codes', t.conditions?.source === 'ebay' ? "from eBay's official list" : 'standard codes (eBay list unavailable)')}

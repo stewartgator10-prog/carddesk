@@ -5,6 +5,7 @@ import {
   applyRule, checkPrice, roundPrice, money, detectCondition, RULES,
 } from './pricingLogic.js';
 import { fetchSellerListings, pushPriceChanges } from './sellerApi.js';
+import { apiFetch } from '../lib/supabase.js';
 
 const LINKS_KEY = 'cdp:priceLinks';     // itemId -> { compKey, costBasis }
 const HISTORY_KEY = 'cdp:priceHistory'; // newest first, capped
@@ -32,7 +33,9 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
   const [drafts, setDrafts] = useState({});        // itemId -> string price
   const [selected, setSelected] = useState(new Set());
   const [filter, setFilter] = useState('');
-  const [rule, setRule] = useState('matchComps');
+  const [rule, setRule] = useState('matchMarket');
+  const [buyerShipping, setBuyerShipping] = useStored('cdp:buyerShipping', '0'); // what buyers pay this seller for shipping
+  const [market, setMarket] = useState(null); // { done, remaining } while refreshing
   const [amount, setAmount] = useState('0');
   const [rounding, setRounding] = useState('cents');
   const [enforceFloor, setEnforceFloor] = useState(true);
@@ -66,7 +69,28 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
   }), [state.listings, links, comps, inventory, settings]);
 
   const visible = rows.filter(r => !filter || String(r.listing.title || '').toLowerCase().includes(filter.toLowerCase()));
-  const ctxFor = r => ({ stats: r.stats, floor: r.floor, enforceFloor, rounding });
+  const ctxFor = r => ({ stats: r.stats, floor: r.floor, enforceFloor, rounding, buyerShipping });
+  const lastMarket = state.listings.map(l => l.comp?.at).filter(Boolean).sort().pop() || null;
+
+  // Automatic comps: refresh TCGplayer market + eBay competition, 15 listings per call until done.
+  async function refreshMarket() {
+    setMarket({ done: 0, remaining: null }); let done = 0; let lastRemaining = Infinity; let stalls = 0;
+    try {
+      for (;;) {
+        const res = await apiFetch('/api/market', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'refresh' }) });
+        const r = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(r.error || `HTTP ${res.status}`);
+        done += r.processed; setMarket({ done, remaining: r.remaining });
+        if (r.note) alertOnce(r.note);
+        if (!r.remaining || !r.processed) break;
+        stalls = r.remaining >= lastRemaining ? stalls + 1 : 0; lastRemaining = r.remaining;
+        if (stalls >= 2) break;
+      }
+      await load();
+      alertOnce(`Market data refreshed for ${done} listing${done === 1 ? '' : 's'}.`);
+    } catch (err) { alertOnce(`Market refresh failed: ${err.message}`); }
+    finally { setMarket(null); }
+  }
 
   const pending = rows.map(r => {
     const raw = drafts[r.listing.itemId];
@@ -79,8 +103,9 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
   function setDraft(itemId, value) { setDrafts(d => ({ ...d, [itemId]: value })); }
 
   function suggest(r) {
-    if (!r.stats) return;
-    setDraft(r.listing.itemId, roundPrice(r.stats.median, rounding).toFixed(2));
+    const base = r.stats?.median ?? r.listing.market?.price ?? r.listing.comp?.low;
+    if (!base) return;
+    setDraft(r.listing.itemId, roundPrice(base, rounding).toFixed(2));
   }
 
   function applyBulk() {
@@ -93,7 +118,8 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
       next[r.listing.itemId] = p.toFixed(2);
     }
     setDrafts(next);
-    if (skipped) alertOnce(`${skipped} selected listing${skipped > 1 ? 's have' : ' has'} no comps, so ${skipped > 1 ? 'they were' : 'it was'} left unchanged.`);
+    const what = { matchMarket: 'a TCGplayer market price', undercut: 'eBay competition data', matchComps: 'sold comps' }[rule] || 'the data this rule needs';
+    if (skipped) alertOnce(`${skipped} selected listing${skipped > 1 ? 's have' : ' has'} no ${what}, so ${skipped > 1 ? 'they were' : 'it was'} left unchanged.`);
   }
 
   const [notice, setNotice] = useState(null);
@@ -145,7 +171,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       {state.demo && (
-        <div className="bg-card" style={{ padding: '12px 16px', borderColor: '#fbbf24', display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: '0.8rem' }}>
+        <div className="bg-card" style={{ padding: '12px 16px', borderColor: 'var(--warn)', display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: '0.8rem' }}>
           <AlertTriangle size={16} className="accent-amber" style={{ flexShrink: 0, marginTop: 2 }} />
           <div>
             <strong className="accent-amber">DEMO MODE.</strong> Your eBay seller account isn't connected yet, so these are sample listings and
@@ -164,7 +190,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
               <option value="cents">Exact cents</option><option value="charm">End in .99</option>
             </select>
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: '0.8rem', color: '#e8e8ed', marginBottom: 10, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: '0.8rem', color: 'var(--ink)', marginBottom: 10, cursor: 'pointer' }}>
             <input type="checkbox" checked={enforceFloor} onChange={e => setEnforceFloor(e.target.checked)} style={{ width: 'auto' }} />
             Never price below profit floor
           </label>
@@ -174,15 +200,23 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
           <button className="btn-ghost" onClick={() => setShowHistory(s => !s)} style={{ padding: '10px 14px', display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: '0.8rem' }}>
             <History size={14} /> History ({history.length})
           </button>
+          <button className="btn-ghost" onClick={refreshMarket} disabled={!!market || state.demo} title="TCGplayer market price + cheapest comparable eBay listings for every active listing (also runs nightly)" style={{ padding: '10px 14px', display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: '0.8rem' }}>
+            {market ? <><Loader size={14} className="spin" /> {market.done}{market.remaining != null ? ` · ${market.remaining} left` : ''}</> : <><RefreshCw size={14} /> Refresh market data</>}
+          </button>
+          <span className="ink-faint" style={{ fontSize: '0.7rem', marginBottom: 10 }}>{lastMarket ? `Market data ${new Date(lastMarket).toLocaleString()}` : 'No market data yet'}</span>
         </div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', borderTop: '1px solid #1f1f2a', paddingTop: 12 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', borderTop: '1px solid var(--line-soft)', paddingTop: 12 }}>
           <div className="ink-dim" style={{ fontSize: '0.75rem', marginBottom: 10 }}>BULK · {selectedCount} selected</div>
           <div style={{ width: 190 }}><label>Rule</label>
-            <select className="bg-input" value={rule} onChange={e => { setRule(e.target.value); setAmount(e.target.value === 'matchComps' ? '0' : ''); }}>
+            <select className="bg-input" value={rule} onChange={e => { setRule(e.target.value); setAmount(['matchComps', 'matchMarket'].includes(e.target.value) ? '0' : e.target.value === 'undercut' ? '0.05' : ''); }}>
               {Object.entries(RULES).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
             </select>
           </div>
           <div style={{ width: 150 }}><label>{RULES[rule].unit}</label><input className="bg-input" type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder={rule === 'percent' ? '-10' : ''} /></div>
+          {rule === 'undercut' && (
+            <div style={{ width: 170 }}><label htmlFor="buyer-ship" title="eBay low prices include the competitor's shipping. Enter what your buyers pay you for shipping so totals compare fairly. 0 = never undercut on total.">Your buyer shipping $</label>
+              <input id="buyer-ship" className="bg-input" type="number" step="0.01" min="0" value={buyerShipping} onChange={e => setBuyerShipping(e.target.value)} /></div>
+          )}
           <button className="btn-primary" onClick={applyBulk} disabled={!selectedCount} style={{ padding: '10px 16px', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
             <Wand2 size={14} /> FILL NEW PRICES
           </button>
@@ -197,7 +231,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
 
       {/* Table */}
       <section className="bg-card" style={{ padding: 0 }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>ACTIVE LISTINGS · {state.listings.length}</h2>
           <button className="btn-primary" disabled={!pending.length} onClick={openReview} style={{ padding: '10px 18px' }}>
             REVIEW {pending.length} CHANGE{pending.length === 1 ? '' : 'S'} →
@@ -208,9 +242,9 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
         {state.listings.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <div style={{ minWidth: 900 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, padding: '12px 16px', fontSize: '0.7rem', letterSpacing: '0.1em', color: '#8a8a96', textTransform: 'uppercase', borderBottom: '1px solid #1f1f2a', alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, padding: '12px 16px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)', alignItems: 'center' }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={selectedCount > 0 && selectedCount === visible.filter(r => r.editable).length} onChange={e => toggleAll(e.target.checked)} />
-                <div>Listing</div><div style={{ textAlign: 'right' }}>Current</div><div>Sold comps</div>
+                <div>Listing</div><div style={{ textAlign: 'right' }}>Current</div><div>Market · eBay low</div>
                 <div style={{ textAlign: 'right' }}>Floor</div><div>New price</div><div style={{ textAlign: 'right' }}>Change</div><div style={{ textAlign: 'right' }}>Net</div>
               </div>
               <div className="scrollable">
@@ -231,9 +265,9 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
             </div>
           </div>
         )}
-        <div className="ink-faint" style={{ padding: '12px 24px', fontSize: '0.7rem', borderTop: '1px solid #1f1f2a' }}>
-          Comps come from your <button className="btn-icon" style={{ padding: 0, textDecoration: 'underline', color: 'inherit', fontSize: 'inherit' }} onClick={onGoToComps}>Sold Comps</button> log
-          (last 90 days, same card and grade). Floor = cost + min profit + shipping after eBay fees. Net = what you keep after fees and shipping, before cost.
+        <div className="ink-faint" style={{ padding: '12px 24px', fontSize: '0.7rem', borderTop: '1px solid var(--line-soft)' }}>
+          mkt = TCGplayer market price for the exact card (English Pokémon and Magic). eBay = cheapest comparable Buy It Now from other sellers, price + their shipping
+          (same card, number, language, graded or raw); hover for the listings. Both refresh nightly. sold = your <button className="btn-icon" style={{ padding: 0, textDecoration: 'underline', color: 'inherit', fontSize: 'inherit' }} onClick={onGoToComps}>Sold Comps</button> log. Floor = cost + min profit + shipping after eBay fees. Net = what you keep after fees and shipping, before cost.
         </div>
       </section>
 
@@ -248,6 +282,25 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
           onConfirm={confirmPush} onClose={() => !pushing && setReview(null)} />
       )}
     </div>
+  );
+}
+
+// TCGplayer market price and the cheapest comparable eBay listings (automatic comps).
+function MarketCell({ listing }) {
+  const { market, comp, price } = listing;
+  const pct = (ref) => (ref > 0 ? Math.round(((price - ref) / ref) * 100) : null);
+  const badge = (p) => (p != null && Math.abs(p) >= 10
+    ? <span className={p > 0 ? 'accent-red' : 'accent-green'} style={{ marginLeft: 4 }}>{p > 0 ? '▲' : '▼'}{Math.abs(p)}%</span> : null);
+  if (!market && !comp) return <div className="ink-faint">no market data</div>;
+  const tip = (comp?.items || []).map((c) => `${money(c.total)}${c.shipping ? ` (${money(c.price)} + ${money(c.shipping)} ship)` : ''} · ${c.seller || ''} · ${c.title}`).join('\n');
+  return (
+    <>
+      {market && <div title={`TCGplayer market${market.name ? ` · ${market.name}` : ''}${market.set ? ` · ${market.set}` : ''}${market.number ? ` #${market.number}` : ''}`}>
+        <span className="ink-faint">mkt </span><strong>{money(market.price)}</strong>{badge(pct(market.price))}</div>}
+      {comp && (comp.count > 0
+        ? <div title={tip}><span className="ink-faint">eBay </span><strong>{money(comp.low)}</strong><span className="ink-faint"> · {comp.count} listed</span>{badge(pct(comp.low))}</div>
+        : <div className="ink-faint">no eBay competition</div>)}
+    </>
   );
 }
 
@@ -279,19 +332,17 @@ function ListingRow({ r, cols, selected, onSelect, draft, onDraft, onSuggest, ch
       </div>
       <div style={{ textAlign: 'right', fontWeight: 600 }}>{money(listing.price)}</div>
       <div style={{ fontSize: '0.75rem' }}>
-        {stats ? (
-          <>
-            <div>
-              <strong>{money(stats.median)}</strong> <span className="ink-faint">· {stats.count} sold</span>
-              {vsComp != null && Math.abs(vsComp) >= 0.1 && (
-                <span className={vsComp > 0 ? 'accent-red' : 'accent-green'} style={{ marginLeft: 6 }}>
-                  {vsComp > 0 ? '▲' : '▼'}{Math.abs(Math.round(vsComp * 100))}%
-                </span>
-              )}
-            </div>
-            <div className="ink-faint">{money(stats.low)}–{money(stats.high)}{!stats.exactCondition && ' · mixed cond.'}</div>
-          </>
-        ) : <span className="ink-faint">no comps</span>}
+        <MarketCell listing={listing} />
+        {stats && (
+          <div title={`${money(stats.low)}–${money(stats.high)}${!stats.exactCondition ? ' · mixed condition' : ''}`}>
+            <span className="ink-faint">sold </span><strong>{money(stats.median)}</strong> <span className="ink-faint">· {stats.count}</span>
+            {vsComp != null && Math.abs(vsComp) >= 0.1 && (
+              <span className={vsComp > 0 ? 'accent-red' : 'accent-green'} style={{ marginLeft: 6 }}>
+                {vsComp > 0 ? '▲' : '▼'}{Math.abs(Math.round(vsComp * 100))}%
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div style={{ textAlign: 'right', fontSize: '0.75rem' }} title={cost != null ? `Cost ${money(cost)}` : 'No cost found. Link to set one.'}>
         {floor != null ? money(floor) : <span className="ink-faint">—</span>}
@@ -299,7 +350,7 @@ function ListingRow({ r, cols, selected, onSelect, draft, onDraft, onSuggest, ch
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <input className="bg-input" type="number" step="0.01" min="0.99" disabled={!editable} value={draft}
           onChange={e => onDraft(e.target.value)} placeholder={listing.price.toFixed(2)} style={{ padding: '6px 8px' }} />
-        {editable && stats && <button className="btn-icon" title={`Use comp median ${money(stats.median)}`} onClick={onSuggest}><Wand2 size={14} /></button>}
+        {editable && (stats || listing.market || listing.comp?.low) && <button className="btn-icon" title={`Use ${stats ? `sold comp median ${money(stats.median)}` : listing.market ? `TCGplayer market ${money(listing.market.price)}` : `eBay low ${money(listing.comp.low)}`}`} onClick={onSuggest}><Wand2 size={14} /></button>}
       </div>
       <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
         {delta != null && Math.abs(delta) >= 0.005
@@ -316,7 +367,7 @@ function LinkEditor({ listing, value, onSave, onClose }) {
   const [compKey, setCompKey] = useState(value.compKey || '');
   const [costBasis, setCostBasis] = useState(value.costBasis ?? '');
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
       <div className="bg-card-raised" style={{ padding: 24, maxWidth: 480, width: '100%' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <h3 className="display-font" style={{ margin: 0, fontSize: '1.3rem' }}>LINK COMPS & COST</h3>
@@ -339,7 +390,7 @@ function ReviewModal({ changes, demo, pushing, onConfirm, onClose }) {
   const totalDelta = changes.reduce((a, c) => a + (c.newPrice - c.oldPrice), 0);
   const flagged = changes.filter(c => c.warnings.length).length;
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
       <div className="bg-card-raised" style={{ padding: 24, maxWidth: 720, width: '100%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 className="display-font" style={{ margin: 0, fontSize: '1.4rem' }}>REVIEW {changes.length} PRICE CHANGE{changes.length === 1 ? '' : 'S'}</h3>
@@ -354,7 +405,7 @@ function ReviewModal({ changes, demo, pushing, onConfirm, onClose }) {
             If a listing's Best Offer auto-decline or auto-accept amount blocks a lower price, CardDesk lowers it by the same % so your offer rules stay the same.
           </div>
         )}
-        <div className="scrollable" style={{ flex: 1, border: '1px solid #2a2a36' }}>
+        <div className="scrollable" style={{ flex: 1, border: '1px solid var(--line)' }}>
           {changes.map(c => (
             <div key={c.itemId} className="grid-row" style={{ gridTemplateColumns: '1fr 80px 20px 80px' }}>
               <div style={{ minWidth: 0 }}>
@@ -382,7 +433,7 @@ function ReviewModal({ changes, demo, pushing, onConfirm, onClose }) {
 function HistoryPanel({ history, onClear }) {
   return (
     <section className="bg-card" style={{ padding: 0 }}>
-      <div style={{ padding: '12px 24px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '12px 24px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>PRICE CHANGE HISTORY</h3>
         {history.length > 0 && <button className="btn-ghost" onClick={onClear} style={{ padding: '6px 10px', fontSize: '0.75rem' }}>Clear</button>}
       </div>

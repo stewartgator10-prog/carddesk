@@ -35,11 +35,22 @@ export async function listActiveListings(ctx) {
     .eq('status', 'Active')
     .order('title');
   if (error) throw new Error(error.message);
-  return data.map(r => ({
-    itemId: r.item_id, sku: r.sku, title: r.title, price: Number(r.price),
-    quantity: r.quantity_available, image: r.image_url, url: r.view_url,
-    listingType: r.listing_type, watchers: r.watch_count, startTime: r.start_time,
-  }));
+  // Automatic comps (TCGplayer market + live eBay competition), when they've been refreshed.
+  const { data: market } = await ctx.admin.from('listing_market')
+    .select('item_id, market_price, catalog_source, catalog_name, catalog_set, catalog_number, market_at, comp_low, comp_median, comp_count, comp_items, comp_at, parsed')
+    .eq('user_id', ctx.userId);
+  const m = new Map((market || []).map(r => [r.item_id, r]));
+  return data.map(r => {
+    const x = m.get(r.item_id);
+    return {
+      itemId: r.item_id, sku: r.sku, title: r.title, price: Number(r.price),
+      quantity: r.quantity_available, image: r.image_url, url: r.view_url,
+      listingType: r.listing_type, watchers: r.watch_count, startTime: r.start_time,
+      market: x?.market_price != null ? { price: Number(x.market_price), source: x.catalog_source, name: x.catalog_name, set: x.catalog_set, number: x.catalog_number, at: x.market_at } : null,
+      comp: x?.comp_at ? { low: x.comp_low != null ? Number(x.comp_low) : null, median: x.comp_median != null ? Number(x.comp_median) : null, count: x.comp_count || 0, items: x.comp_items || [], at: x.comp_at } : null,
+      card: x?.parsed ? { name: x.parsed.card_name, number: x.parsed.collector_number, language: x.parsed.language, isSingle: x.parsed.is_single_card } : null,
+    };
+  });
 }
 
 export async function recordPriceChanges(ctx, results, changes) {

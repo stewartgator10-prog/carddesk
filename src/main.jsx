@@ -1,4 +1,8 @@
 import React, { Suspense, lazy } from 'react'
+import '@fontsource-variable/nunito'
+import '@fontsource/zen-maru-gothic/latin-700.css'
+import '@fontsource/zen-maru-gothic/latin-900.css'
+import './theme.css'
 import ReactDOM from 'react-dom/client'
 import CardDeskPro from './CardDeskPro.jsx'
 import AuthGate from './AuthGate.jsx'
