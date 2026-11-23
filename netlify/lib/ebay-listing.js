@@ -232,6 +232,22 @@ export function listingSignature(item) {
     item.game || null, item.rarity || null, item.extraction?.game_name || null])).digest('hex').slice(0, 16);
 }
 
+// The shipping package: calculated shipping needs its weight and size. The seller's numbers from
+// Snap settings, otherwise a standard card mailer (3 oz, 9 x 6 x 1 in).
+export function packageXml(settings = {}) {
+  const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
+  const oz = num(settings.snapPackageWeightOz, 3);
+  const lbs = Math.floor(oz / 16);
+  const dim = (k, d) => String(Math.ceil(num(settings[k], d)));
+  return '<ShippingPackageDetails><MeasurementUnit>English</MeasurementUnit>'
+    + `<PackageDepth unit="in">${dim('snapPackageDepthIn', 1)}</PackageDepth>`
+    + `<PackageLength unit="in">${dim('snapPackageLengthIn', 9)}</PackageLength>`
+    + `<PackageWidth unit="in">${dim('snapPackageWidthIn', 6)}</PackageWidth>`
+    + '<ShippingPackage>PackageThickEnvelope</ShippingPackage>'
+    + `<WeightMajor unit="lbs">${lbs}</WeightMajor><WeightMinor unit="oz">${Math.ceil(oz - lbs * 16)}</WeightMinor>`
+    + '</ShippingPackageDetails>';
+}
+
 export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
   const tpl = templates?.[item.game] || templates?.pokemon || templates?.mtg;
   if (!tpl) throw new Error('No listing setup learned yet.');
@@ -258,6 +274,7 @@ export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
     '<ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>1</Quantity>',
     `<SKU>${esc(item.sku || snapSku(item.id))}</SKU>`,
     `<UUID>${listingUuid(item.id)}</UUID>`,
+    packageXml(settings),
     `<PictureDetails>${pictureUrls.map((u) => `<PictureURL>${esc(u)}</PictureURL>`).join('')}</PictureDetails>`,
     `<ItemSpecifics>${specifics.map((s) => `<NameValueList><Name>${esc(s.name)}</Name>${s.values.map((v) => `<Value>${esc(v)}</Value>`).join('')}</NameValueList>`).join('')}</ItemSpecifics>`,
     '<SellerProfiles>',
