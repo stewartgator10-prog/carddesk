@@ -42,7 +42,7 @@ Report only what you can read or clearly see. Never invent a value: use null whe
 - notes: anything a seller should check by hand, otherwise null.`;
 
 let client = null;
-function getClient() {
+export function getClient() {
   if (!client) {
     if (!process.env.ANTHROPIC_API_KEY) {
       const e = new Error('ANTHROPIC_API_KEY is not set in Netlify environment variables.');

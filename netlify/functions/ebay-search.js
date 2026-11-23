@@ -1,45 +1,8 @@
 // netlify/functions/ebay-search.js
 import { requireUser } from '../lib/auth.js';
+import { getAppToken as getAccessToken } from '../lib/ebay-browse.js';
 // Live eBay listing search using the Browse API.
-// Uses Client Credentials OAuth flow. Token is cached in-memory for ~2 hours.
-
-let cachedToken = null;
-let tokenExpiresAt = 0;
-
-async function getAccessToken() {
-  const now = Date.now();
-  if (cachedToken && now < tokenExpiresAt - 60_000) {
-    return cachedToken;
-  }
-
-  const appId = process.env.EBAY_APP_ID;
-  const certId = process.env.EBAY_CERT_ID || process.env.ebay_Cert_ID; // site stores it as ebay_Cert_ID
-
-  if (!appId || !certId) {
-    throw new Error('Missing EBAY_APP_ID or EBAY_CERT_ID environment variable.');
-  }
-
-  const credentials = Buffer.from(`${appId}:${certId}`).toString('base64');
-
-  const res = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': `Basic ${credentials}`,
-    },
-    body: 'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope',
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`eBay OAuth failed: ${res.status} ${text}`);
-  }
-
-  const data = await res.json();
-  cachedToken = data.access_token;
-  tokenExpiresAt = now + (data.expires_in * 1000);
-  return cachedToken;
-}
+// App token (client credentials) comes from ../lib/ebay-browse.js, cached in memory.
 
 export default async (req) => {
   if (req.method !== 'GET') {

@@ -146,7 +146,9 @@ export function roundPrice(p, mode = 'cents') {
 
 // Bulk rules. Each returns the new price for one listing, or null to leave it alone.
 export const RULES = {
-  matchComps: { label: 'Match comp median', unit: '% over/under', needsComps: true },
+  matchMarket: { label: 'Match TCGplayer market', unit: '% over/under' },
+  undercut: { label: 'Undercut eBay low by $', unit: '$ below' },
+  matchComps: { label: 'Match sold comp median', unit: '% over/under', needsComps: true },
   percent: { label: 'Change by %', unit: '%' },
   dollars: { label: 'Change by $', unit: '$' },
   setTo: { label: 'Set all to $', unit: '$' },
@@ -160,6 +162,18 @@ export function applyRule(listing, rule, amount, ctx) {
     case 'matchComps': {
       if (!ctx.stats) return null;
       next = ctx.stats.median * (1 + (Number.isFinite(a) ? a : 0) / 100);
+      break;
+    }
+    case 'matchMarket': {
+      if (!(listing.market?.price > 0)) return null;
+      next = listing.market.price * (1 + (Number.isFinite(a) ? a : 0) / 100);
+      break;
+    }
+    case 'undercut': {
+      // Competitor prices are totals (price + their shipping). Subtracting what this seller charges
+      // buyers for shipping compares like with like; with 0 the result never undercuts on total.
+      if (!(listing.comp?.low > 0)) return null;
+      next = listing.comp.low - (Number.isFinite(a) ? a : 0) - (Number(ctx.buyerShipping) || 0);
       break;
     }
     case 'percent': if (!Number.isFinite(a)) return null; next = cur * (1 + a / 100); break;
