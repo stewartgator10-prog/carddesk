@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign } from 'lucide-react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera } from 'lucide-react';
 import EbaySalesTab from './EbaySalesTab.jsx';
 import ListingsTab from './ListingsTab.jsx';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, markLegacyLocalDataHandled } from './lib/store.js';
 import RepricerTab from './pricing/RepricerTab.jsx';
+// Loaded only when the tab is opened, so phones don't download it up front.
+const SnapTab = lazy(() => import('./SnapTab.jsx'));
+import { SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
 import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
 
 const DEFAULT_SETTINGS = {
@@ -15,6 +18,7 @@ const DEFAULT_SETTINGS = {
   defaultShipping: 1.00,
   sharpnessThreshold: 20,
   minProfitDollars: 5,
+  ...SNAP_DEFAULTS, // Snap to List: model, markup, minimum, price ending, monthly AI budget
 };
 
 const GAMES = ['Pokémon', 'MTG'];
@@ -404,10 +408,10 @@ export default function CardDeskPro({ session }) {
         .scrollable::-webkit-scrollbar-thumb { background: #2a2a36; }
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        @media (max-width: 768px) { .responsive-grid { grid-template-columns: 1fr !important; } .tab-btn { padding: 12px 14px; font-size: 0.9rem; } }
+        @media (max-width: 768px) { .responsive-grid { grid-template-columns: 1fr !important; } .tab-btn { padding: 12px 14px; font-size: 0.9rem; } .app-pad { padding-left: 16px !important; padding-right: 16px !important; } main.app-pad { padding-top: 16px !important; } }
       `}</style>
 
-      <header style={{ borderBottom: '1px solid #2a2a36', padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      <header className="app-pad" style={{ borderBottom: '1px solid #2a2a36', padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
             <h1 className="display-font" style={{ fontSize: '2rem', margin: 0, color: '#ff4d4d' }}>CARDDESK</h1>
@@ -419,7 +423,7 @@ export default function CardDeskPro({ session }) {
             <span>{comps.length} comps logged</span>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn-ghost" onClick={exportData} style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Download size={14} /> Backup</button>
           <label className="btn-ghost" style={{ padding: '10px 14px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
             <Upload size={14} /> Import Backup<input type="file" accept=".json" onChange={importData} style={{ display: 'none' }} />
@@ -430,21 +434,22 @@ export default function CardDeskPro({ session }) {
       </header>
 
       {legacyLocal && (
-        <div style={{ padding: '12px 32px', background: 'rgba(251, 191, 36, 0.08)', borderBottom: '1px solid #fbbf24', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem' }}>
+        <div className="app-pad" style={{ padding: '12px 32px', background: 'rgba(251, 191, 36, 0.08)', borderBottom: '1px solid #fbbf24', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem' }}>
           <span className="accent-amber">This browser still has {legacyLocal.total} items from the old CardDesk (before accounts). Copy them into your account?</span>
           <button className="btn-primary" onClick={importLegacyLocal} style={{ padding: '6px 14px' }}>Import them</button>
           <button className="btn-ghost" onClick={dismissLegacyLocal} style={{ padding: '6px 12px', fontSize: '0.75rem' }}>Not now, don't ask again</button>
         </div>
       )}
       {(importMsg || dataError) && (
-        <div style={{ padding: '10px 32px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: '0.8rem' }}>
+        <div className="app-pad" style={{ padding: '10px 32px', borderBottom: '1px solid #2a2a36', display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: '0.8rem' }}>
           <span className={dataError || (importMsg && !importMsg.ok) ? 'accent-red' : 'accent-green'}>{dataError || importMsg.text}</span>
           <button className="btn-icon" onClick={() => { setImportMsg(null); setDataError(null); }}><X size={14} /></button>
         </div>
       )}
 
-      <nav style={{ borderBottom: '1px solid #2a2a36', padding: '0 32px', display: 'flex', gap: 0, overflowX: 'auto' }}>
+      <nav className="app-pad" style={{ borderBottom: '1px solid #2a2a36', padding: '0 32px', display: 'flex', gap: 0, overflowX: 'auto' }}>
         <button className={`tab-btn ${tab === 'analyzer' ? 'active' : ''}`} onClick={() => setTab('analyzer')}><Target size={16} /> Deal Analyzer</button>
+        <button className={`tab-btn ${tab === 'snap' ? 'active' : ''}`} onClick={() => setTab('snap')}><Camera size={16} /> Snap to List</button>
         <button className={`tab-btn ${tab === 'livesearch' ? 'active' : ''}`} onClick={() => setTab('livesearch')}><Zap size={16} /> Live eBay Search</button>
         <button className={`tab-btn ${tab === 'scanner' ? 'active' : ''}`} onClick={() => setTab('scanner')}><Search size={16} /> Bulk Scanner</button>
         <button className={`tab-btn ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}><Eye size={16} /> Watchlist</button>
@@ -455,7 +460,7 @@ export default function CardDeskPro({ session }) {
         <button className={`tab-btn ${tab === 'ebaysales' ? 'active' : ''}`} onClick={() => setTab('ebaysales')}><DollarSign size={16} /> eBay Sales · Real P&L</button>
       </nav>
 
-      <main style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
+      <main className="app-pad" style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
 
         {/* ============ DEAL ANALYZER ============ */}
         {tab === 'analyzer' && (
@@ -782,6 +787,11 @@ export default function CardDeskPro({ session }) {
           </div>
         )}
         {tab === 'ebaysales' && <EbaySalesTab />}
+        {tab === 'snap' && (
+          <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
+            <SnapTab userId={userId} settings={settings} setSettings={setSettings} />
+          </Suspense>
+        )}
       </main>
 
       {sellingId && (
