@@ -13,6 +13,16 @@ export const SNAP_DEFAULTS = {
 };
 
 export const CONFIDENCE_OK = 0.8;
+
+// A listing's photos in eBay order: the main (identified) photo first, then the extras.
+// eBay itself allows 24; 12 keeps the check quick and is plenty for a single card.
+export const MAX_LISTING_PHOTOS = 12;
+export function listingPhotoPaths(item) {
+  const extras = Array.isArray(item?.extra_photo_paths) && item.extra_photo_paths.length
+    ? item.extra_photo_paths
+    : [item?.back_photo_path]; // cards saved before extra photos existed
+  return [...new Set([item?.photo_path, ...extras].filter(Boolean))];
+}
 const round2 = (n) => Math.round(n * 100) / 100;
 
 // Market price -> list price. At or under the minimum the minimum is used as-is;
