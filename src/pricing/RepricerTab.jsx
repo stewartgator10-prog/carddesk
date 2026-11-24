@@ -4,7 +4,8 @@ import {
   compsForListing, compStats, costForListing, floorPrice, netAfterFees,
   applyRule, checkPrice, roundPrice, money, detectCondition, RULES,
 } from './pricingLogic.js';
-import { fetchSellerListings, pushPriceChanges } from './sellerApi.js';
+import { fetchSellerListings, pushPriceChanges, setListingBestOffer } from './sellerApi.js';
+import { askChoice } from '../lib/dialog.jsx';
 import { apiFetch } from '../lib/supabase.js';
 
 const LINKS_KEY = 'cdp:priceLinks';     // itemId -> { compKey, costBasis }
@@ -166,7 +167,28 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
   }
 
   const selectedCount = [...selected].length;
-  const cols = '28px minmax(220px, 2fr) 80px 150px 90px 110px 80px 90px';
+  const cols = '28px minmax(220px, 2fr) 80px 150px 90px 110px 80px 90px 96px';
+  const [offerBusy, setOfferBusy] = useState(null);
+  async function toggleBestOffer(listing) {
+    let enabled = listing.bestOffer === true ? false : listing.bestOffer === false ? true : null;
+    if (enabled === null) {
+      const pick = await askChoice(`Best Offer on "${listing.title}" (CardDesk doesn't know its current setting yet):`,
+        [{ value: 'off', label: 'Turn Best Offer off' }, { value: 'on', label: 'Turn Best Offer on' }], { title: 'Best Offer' });
+      if (!pick) return;
+      enabled = pick === 'on';
+    }
+    setOfferBusy(listing.itemId);
+    try {
+      const res = await setListingBestOffer(listing.itemId, enabled);
+      setState(s => ({ ...s, listings: s.listings.map(l => l.itemId === listing.itemId ? { ...l, bestOffer: enabled } : l) }));
+      const t = res.result || {};
+      alertOnce(enabled ? `Best Offer on${t.accept != null ? `: offers of ${money(t.accept)} or more accepted, under ${money(t.accept)} declined` : ''}.` : 'Best Offer off. You can now set any price.');
+    } catch (err) {
+      alertOnce(`Best Offer not changed: ${err.message}`);
+    } finally {
+      setOfferBusy(null);
+    }
+  }
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -245,7 +267,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
               <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 8, padding: '12px 16px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)', alignItems: 'center' }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={selectedCount > 0 && selectedCount === visible.filter(r => r.editable).length} onChange={e => toggleAll(e.target.checked)} />
                 <div>Listing</div><div style={{ textAlign: 'right' }}>Current</div><div>Market · eBay low</div>
-                <div style={{ textAlign: 'right' }}>Floor</div><div>New price</div><div style={{ textAlign: 'right' }}>Change</div><div style={{ textAlign: 'right' }}>Net</div>
+                <div style={{ textAlign: 'right' }}>Floor</div><div>New price</div><div style={{ textAlign: 'right' }}>Change</div><div style={{ textAlign: 'right' }}>Net</div><div style={{ textAlign: 'center' }}>Best Offer</div>
               </div>
               <div className="scrollable">
                 {visible.map(r => (
@@ -259,6 +281,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
                     settings={settings}
                     result={lastResults[r.listing.itemId]}
                     onEditLink={() => setEditingLink(r.listing)}
+                    onBestOffer={() => toggleBestOffer(r.listing)} offerBusy={offerBusy === r.listing.itemId}
                   />
                 ))}
               </div>
@@ -304,7 +327,7 @@ function MarketCell({ listing }) {
   );
 }
 
-function ListingRow({ r, cols, selected, onSelect, draft, onDraft, onSuggest, check, settings, result, onEditLink }) {
+function ListingRow({ r, cols, selected, onSelect, draft, onDraft, onSuggest, check, settings, result, onEditLink, onBestOffer, offerBusy }) {
   const { listing, stats, floor, cost, editable } = r;
   const newPrice = check && !check.blocked ? check.price : null;
   const delta = newPrice != null ? newPrice - listing.price : null;
@@ -359,6 +382,18 @@ function ListingRow({ r, cols, selected, onSelect, draft, onDraft, onSuggest, ch
         {check?.warnings?.length > 0 && <div className="accent-amber" style={{ fontSize: '0.65rem' }} title={check.warnings.join('\n')}>⚠ {check.warnings[0]}</div>}
       </div>
       <div style={{ textAlign: 'right', fontSize: '0.8rem' }} className={cost != null && net - cost < 0 ? 'accent-red' : ''}>{money(net)}</div>
+      <div style={{ textAlign: 'center' }}>
+        {r.editable && (
+          <button type="button" role="switch" aria-checked={listing.bestOffer === true ? 'true' : listing.bestOffer === false ? 'false' : 'mixed'}
+            aria-label={`Best Offer for ${listing.title}: ${listing.bestOffer === true ? 'on' : listing.bestOffer === false ? 'off' : 'not known'}`}
+            className="btn-ghost" disabled={offerBusy} onClick={onBestOffer}
+            title={listing.bestOffer === true ? 'Best Offer is on. Turn it off to set any price.' : listing.bestOffer === false ? 'Best Offer is off. Turn it on: offers at 90% of the price and up are accepted.' : 'Best Offer setting not known yet. Choose on or off.'}
+            style={{ padding: '4px 10px', fontSize: '0.72rem', minWidth: 64, fontWeight: 700,
+              ...(listing.bestOffer === true ? { background: 'var(--good-wash)', borderColor: 'var(--leaf)', color: 'var(--leaf-deep)' } : {}) }}>
+            {offerBusy ? <Loader size={11} className="spin" /> : listing.bestOffer === true ? 'On' : listing.bestOffer === false ? 'Off' : 'On / off?'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

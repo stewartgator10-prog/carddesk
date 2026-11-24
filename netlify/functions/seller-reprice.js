@@ -9,7 +9,7 @@
 //  - every item must be one of this user's Active fixed-price listings (auctions can't be repriced)
 //  - a change of 50% or more against the synced price is refused unless confirmLargeChanges is true
 import { getSellerContext, recordPriceChanges } from '../lib/seller-adapter.js';
-import { revisePrices } from '../lib/trading-price.js';
+import { revisePrices, setBestOffer } from '../lib/trading-price.js';
 
 const MAX_CHANGES = 200;
 export const LARGE_CHANGE = 0.5;
@@ -53,6 +53,7 @@ export default async (req) => {
   if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
   let body;
   try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  if (body && body.action === 'best_offer') return bestOfferAction(req, body);
   if (!body || typeof body !== 'object' || !Array.isArray(body.changes)) return json({ error: 'Body must be { changes: [...] }' }, 400);
   const changes = body.changes.map(c => (c && typeof c === 'object'
     ? { ...c, itemId: c.itemId != null ? String(c.itemId) : c.itemId, newPrice: Math.round(Number(c.newPrice) * 100) / 100 }
@@ -82,5 +83,30 @@ export default async (req) => {
     return json({ error: 'Reprice failed', detail: err.message }, 500);
   }
 };
+
+// POST { action: 'best_offer', itemId, enabled } turns Best Offer on (auto-accept at 90% of the price
+// and up, auto-decline below, or the seller's own %) or off for one of the seller's live Buy It Now listings.
+async function bestOfferAction(req, body) {
+  const itemId = body.itemId != null ? String(body.itemId) : '';
+  if (!itemId || typeof body.enabled !== 'boolean') return json({ error: 'Send { action: "best_offer", itemId, enabled: true | false }' }, 400);
+  try {
+    const ctx = await getSellerContext(req, { withToken: true });
+    if (ctx.response) return ctx.response;
+    if (ctx.reason === 'ebay_reconnect') return json({ error: ctx.error || 'Reconnect your eBay account.' }, 409);
+    if (!ctx.connected) return json({ demo: true, result: { itemId, enabled: body.enabled } });
+    const { data: l, error } = await ctx.admin.from('ebay_listings').select('item_id, price, status, listing_type')
+      .eq('user_id', ctx.userId).eq('item_id', itemId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!l || l.status !== 'Active') return json({ error: `Item ${itemId} isn't one of your active eBay listings. Sync your listings and try again.` }, 400);
+    if (l.listing_type && l.listing_type !== 'FixedPriceItem') return json({ error: 'Best Offer is only for Buy It Now listings.' }, 400);
+    const { data: s } = await ctx.admin.from('settings').select('data').eq('user_id', ctx.userId).maybeSingle();
+    const pct = Number(s?.data?.snapBestOfferPct ?? 10);
+    const result = await setBestOffer(ctx.token, { itemId, enabled: body.enabled, price: Number(l.price), pct });
+    await ctx.admin.from('ebay_listings').update({ best_offer: body.enabled }).eq('user_id', ctx.userId).eq('item_id', itemId);
+    return json({ demo: false, result });
+  } catch (err) {
+    return json({ error: `eBay didn't change Best Offer: ${err.message}` }, 502);
+  }
+}
 
 export const config = { path: '/api/seller-reprice' };

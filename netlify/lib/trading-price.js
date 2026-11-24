@@ -112,6 +112,34 @@ export function scaleBestOffer({ oldPrice, newPrice, decline, accept }) {
   return { decline: d, accept: a };
 }
 
+// The seller's offer rule: offers at (100 - pct)% of the price or more are accepted automatically,
+// anything lower is declined automatically (1 cent under, since eBay needs decline < accept < price).
+export function offerThresholds(price, pct = 10) {
+  const p = Number(price);
+  const cut = Number.isFinite(Number(pct)) && Number(pct) > 0 ? Number(pct) : 10;
+  let accept = Math.min(floorCents(p * (1 - cut / 100)), floorCents(p - 0.01));
+  const decline = floorCents(accept - 0.01);
+  if (!(accept >= 0.02) || !(decline >= 0.01)) return { accept: null, decline: null };
+  return { accept, decline };
+}
+
+// Turns Best Offer on (with the offer rule above) or off for one live listing.
+export function buildBestOfferXml({ itemId, enabled, price, pct = 10 }) {
+  const t = enabled ? offerThresholds(price, pct) : null;
+  const listing = t?.accept != null
+    ? `<ListingDetails><MinimumBestOfferPrice currencyID="USD">${money2(t.decline)}</MinimumBestOfferPrice><BestOfferAutoAcceptPrice currencyID="USD">${money2(t.accept)}</BestOfferAutoAcceptPrice></ListingDetails>`
+    : '';
+  const deleted = enabled ? '' : '<DeletedField>Item.ListingDetails.MinimumBestOfferPrice</DeletedField><DeletedField>Item.ListingDetails.BestOfferAutoAcceptPrice</DeletedField>';
+  return `<?xml version="1.0" encoding="utf-8"?><ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel><Item><ItemID>${esc(itemId)}</ItemID><BestOfferDetails><BestOfferEnabled>${enabled ? 'true' : 'false'}</BestOfferEnabled></BestOfferDetails>${listing}</Item>${deleted}</ReviseFixedPriceItemRequest>`;
+}
+
+export async function setBestOffer(token, { itemId, enabled, price, pct = 10 }, call = tradingCall) {
+  const xml = await call(token, 'ReviseFixedPriceItem', buildBestOfferXml({ itemId, enabled, price, pct }));
+  if (!ackOk(xml)) throw new Error(errorsOf(xml) || `eBay returned ${tag(xml, 'Ack') || 'Failure'}`);
+  const t = enabled ? offerThresholds(price, pct) : null;
+  return { itemId: String(itemId), enabled: !!enabled, accept: t?.accept ?? null, decline: t?.decline ?? null };
+}
+
 export function buildReviseFixedPriceXml({ itemId, newPrice, decline, accept }) {
   const details = [
     decline != null ? `<MinimumBestOfferPrice currencyID="USD">${money2(decline)}</MinimumBestOfferPrice>` : '',
@@ -133,7 +161,7 @@ export async function reviseWithBestOffer(token, change, call = tradingCall) {
   const warnings = [];
   if (item.decline != null) warnings.push(`Best Offer auto-decline ${money2(item.decline)} → ${scaled.decline != null ? money2(scaled.decline) : 'off'}`);
   if (item.accept != null) warnings.push(`Best Offer auto-accept ${money2(item.accept)} → ${scaled.accept != null ? money2(scaled.accept) : 'off'}`);
-  return { itemId: change.itemId, ok: true, price: change.newPrice, error: null, warnings };
+  return { itemId: change.itemId, ok: true, price: change.newPrice, error: null, warnings, bestOffer: true };
 }
 
 export async function revisePrices(token, changes, call = tradingCall) {

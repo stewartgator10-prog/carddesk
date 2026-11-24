@@ -98,7 +98,7 @@ test('listing XML: his category, condition code, specifics, location, policies b
   assert.match(xml, /<ListingDuration>GTC<\/ListingDuration>/);
   assert.match(xml, /<UUID>0F8FAD5BD9CB469FA16570867728950E<\/UUID>/);
   assert.equal((xml.match(/<PictureURL>/g) || []).length, 2);
-  assert.match(xml, /<MinimumBestOfferPrice currencyID="USD">3.72<\/MinimumBestOfferPrice>/);   // 76.15% of 4.89, rounded down
+  assert.match(xml, /<BestOfferDetails><BestOfferEnabled>true<\/BestOfferEnabled><\/BestOfferDetails><ListingDetails><MinimumBestOfferPrice currencyID="USD">4.39<\/MinimumBestOfferPrice><BestOfferAutoAcceptPrice currencyID="USD">4.40<\/BestOfferAutoAcceptPrice>/); // accept 90% of 4.89 and up, decline below
   assert.match(xml, /<Name>Character<\/Name><Value>Fuecoco<\/Value>/);   // per-card value, not the template's "Briar"
   assert.doesNotMatch(xml, /Briar/);
   assert.match(xml, /<Name>Manufacturer<\/Name><Value>The Pokémon Company<\/Value>/); // static value copied
@@ -204,13 +204,13 @@ test('check uploads both photos, runs eBay\'s free verify, and nothing is listed
 test('publish: only after a passing check of the same listing; then stock + listing are recorded', async () => {
   const db = publishDb(card());
   const item = () => db.tables.snap_items[0];
-  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: item(), settings: {}, call: async () => { throw new Error('should not call'); } }), /check on this card first/);
+  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: item(), settings: { snapPromotePct: 0 }, call: async () => { throw new Error('should not call'); } }), /check on this card first/);
   await checkSnapItem({ db, userId: U, token: 't', item: item(), settings: {}, fetchImpl: uploadOk, call: async () => verifyOk });
 
-  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: { ...item(), price: 1.99 }, settings: {}, call: async () => { throw new Error('no'); } }), /changed after it was checked/);
+  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: { ...item(), price: 1.99 }, settings: { snapPromotePct: 0 }, call: async () => { throw new Error('no'); } }), /changed after it was checked/);
 
   const sent = [];
-  const r = await publishSnapItem({ db, userId: U, token: 't', item: item(), settings: {}, call: async (_t, name, body) => { sent.push([name, body]); return '<AddFixedPriceItemResponse><Ack>Success</Ack><ItemID>407999000111</ItemID><Fees><Fee><Name>ListingFee</Name><Fee>0.0</Fee></Fee></Fees></AddFixedPriceItemResponse>'; } });
+  const r = await publishSnapItem({ db, userId: U, token: 't', item: item(), settings: { snapPromotePct: 0 }, call: async (_t, name, body) => { sent.push([name, body]); return '<AddFixedPriceItemResponse><Ack>Success</Ack><ItemID>407999000111</ItemID><Fees><Fee><Name>ListingFee</Name><Fee>0.0</Fee></Fee></Fees></AddFixedPriceItemResponse>'; } });
   assert.equal(r.itemId, '407999000111');
   assert.equal(sent[0][0], 'AddFixedPriceItem');
   assert.match(sent[0][1], /<UUID>0F8FAD5BD9CB469FA16570867728950E<\/UUID>/);
@@ -225,13 +225,13 @@ test('publish: only after a passing check of the same listing; then stock + list
   assert.equal(db.tables.ebay_listings[0].status, 'Active');
 
   // A second publish of the same card is refused before eBay is called.
-  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: item(), settings: {}, call: async () => { throw new Error('no'); } }), /Only approved cards/);
+  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: item(), settings: { snapPromotePct: 0 }, call: async () => { throw new Error('no'); } }), /Only approved cards/);
 });
 
 test('publish: a lost response retried comes back as a duplicate and is still recorded once', async () => {
   const db = publishDb(card());
   await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl: uploadOk, call: async () => verifyOk });
-  const r = await publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, call: async () =>
+  const r = await publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: { snapPromotePct: 0 }, call: async () =>
     '<AddFixedPriceItemResponse><Ack>Failure</Ack><Errors><LongMessage>Duplicate UUID used.</LongMessage><SeverityCode>Error</SeverityCode></Errors><DuplicateInvocationDetails><DuplicateInvocationID>0F8F</DuplicateInvocationID><Status>Success</Status><InvocationTrackingID>407999000222</InvocationTrackingID></DuplicateInvocationDetails></AddFixedPriceItemResponse>' });
   assert.equal(r.itemId, '407999000222');
   assert.equal(db.tables.inventory.length, 1);
@@ -240,7 +240,7 @@ test('publish: a lost response retried comes back as a duplicate and is still re
 test('publish failure leaves the card approved and records why', async () => {
   const db = publishDb(card());
   await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl: uploadOk, call: async () => verifyOk });
-  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, call: async () =>
+  await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: { snapPromotePct: 0 }, call: async () =>
     '<AddFixedPriceItemResponse><Ack>Failure</Ack><Errors><LongMessage>Selling limit reached.</LongMessage><SeverityCode>Error</SeverityCode></Errors></AddFixedPriceItemResponse>' }), /Selling limit/);
   assert.equal(db.tables.snap_items[0].status, 'approved');
   assert.equal(db.tables.snap_items[0].publish_state, 'failed');
@@ -287,4 +287,62 @@ test('every listing carries the shipping package: 3 oz, 9 x 6 x 1 in by default,
   assert.match(xml, /<ShippingPackageDetails><MeasurementUnit>English<\/MeasurementUnit><PackageDepth unit="in">1<\/PackageDepth><PackageLength unit="in">9<\/PackageLength><PackageWidth unit="in">6<\/PackageWidth><ShippingPackage>PackageThickEnvelope<\/ShippingPackage><WeightMajor unit="lbs">0<\/WeightMajor><WeightMinor unit="oz">3<\/WeightMinor><\/ShippingPackageDetails>/);
   assert.match(packageXml({ snapPackageWeightOz: 20, snapPackageLengthIn: 10, snapPackageWidthIn: 7.5, snapPackageDepthIn: 2 }), /<PackageDepth unit="in">2<.*<PackageLength unit="in">10<.*<PackageWidth unit="in">8<.*<WeightMajor unit="lbs">1<\/WeightMajor><WeightMinor unit="oz">4</);
   assert.match(packageXml({ snapPackageWeightOz: 'x' }), /<WeightMinor unit="oz">3</);
+});
+
+test('Best Offer: accept at 90% and up, decline below, on or off per listing; new listings follow the settings', async () => {
+  const { offerThresholds, buildBestOfferXml, setBestOffer } = await import('../netlify/lib/trading-price.js');
+  assert.deepEqual(offerThresholds(10), { accept: 9, decline: 8.99 });
+  assert.deepEqual(offerThresholds(0.99), { accept: 0.89, decline: 0.88 });
+  assert.deepEqual(offerThresholds(25, 20), { accept: 20, decline: 19.99 });
+  assert.deepEqual(offerThresholds(0.02), { accept: null, decline: null });            // too cheap for two thresholds
+
+  const on = buildBestOfferXml({ itemId: '123', enabled: true, price: 4.89 });
+  assert.match(on, /<ItemID>123<\/ItemID><BestOfferDetails><BestOfferEnabled>true<\/BestOfferEnabled><\/BestOfferDetails><ListingDetails><MinimumBestOfferPrice currencyID="USD">4.39<\/MinimumBestOfferPrice><BestOfferAutoAcceptPrice currencyID="USD">4.40</);
+  const off = buildBestOfferXml({ itemId: '123', enabled: false, price: 4.89 });
+  assert.match(off, /<BestOfferEnabled>false<\/BestOfferEnabled><\/BestOfferDetails><\/Item><DeletedField>Item.ListingDetails.MinimumBestOfferPrice<\/DeletedField><DeletedField>Item.ListingDetails.BestOfferAutoAcceptPrice<\/DeletedField>/);
+  assert.doesNotMatch(off, /<StartPrice/);                                                // the price itself is left alone
+
+  const sent = [];
+  const r = await setBestOffer('t', { itemId: '123', enabled: false, price: 4.89 }, async (_t, name, body) => { sent.push(name); return '<ReviseFixedPriceItemResponse><Ack>Success</Ack></ReviseFixedPriceItemResponse>'; });
+  assert.deepEqual([sent, r.enabled], [['ReviseFixedPriceItem'], false]);
+  await assert.rejects(setBestOffer('t', { itemId: '1', enabled: true, price: 5 }, async () => '<R><Ack>Failure</Ack><Errors><SeverityCode>Error</SeverityCode><LongMessage>Nope.</LongMessage></Errors></R>'), /Nope\./);
+
+  const offXml = buildItemXml({ item: card(), templates, settings: { snapBestOffer: false }, pictureUrls: [] });
+  assert.match(offXml, /<BestOfferEnabled>false<\/BestOfferEnabled>/);
+  assert.doesNotMatch(offXml, /MinimumBestOfferPrice/);
+});
+
+test('Promoted Listings: new listings join one 2% campaign, created on first use; problems never undo the listing', async () => {
+  const { promoteListing, promoRate, RECONNECT_FOR_PROMO } = await import('../netlify/lib/ebay-promote.js');
+  assert.equal(promoRate({}), 2);
+  assert.equal(promoRate({ snapPromotePct: 0 }), 0);
+  const db = fakeDb({ ebay_accounts: [{ id: 'acct', user_id: U }] });
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push(`${init.method} ${url.replace('https://api.ebay.com/sell/marketing/v1', '')} ${init.body}`);
+    if (url.endsWith('/ad_campaign')) return new Response('', { status: 201, headers: { Location: 'https://api.ebay.com/sell/marketing/v1/ad_campaign/C1' } });
+    return new Response('', { status: 201 });
+  };
+  const r = await promoteListing({ db, userId: U, token: 't', itemId: '407', settings: {}, fetchImpl });
+  assert.deepEqual([r.ok, r.rate], [true, 2]);
+  assert.match(calls[0], /^POST \/ad_campaign .*"fundingModel":"COST_PER_SALE","bidPercentage":"2"/);
+  assert.equal(calls[1], 'POST /ad_campaign/C1/ad {"listingId":"407","bidPercentage":"2"}');
+  assert.equal(db.tables.ebay_accounts[0].promo_campaign_id, 'C1');
+  // Next listing reuses the campaign.
+  await promoteListing({ db, userId: U, token: 't', itemId: '408', settings: {}, fetchImpl });
+  assert.equal(calls.length, 3);
+  // Without the marketing permission: a clear "reconnect" message, no throw.
+  const denied = await promoteListing({ db, userId: U, token: 't', itemId: '409', settings: {}, fetchImpl: async () => new Response(JSON.stringify({ errors: [{ message: 'Insufficient permissions to fulfill the request.' }] }), { status: 403 }) });
+  assert.deepEqual([denied.ok, denied.error], [false, RECONNECT_FOR_PROMO]);
+  // A campaign that ended is replaced once.
+  const db2 = fakeDb({ ebay_accounts: [{ id: 'acct', user_id: U, promo_campaign_id: 'OLD' }] });
+  const seen = [];
+  const r2 = await promoteListing({ db: db2, userId: U, token: 't', itemId: '410', settings: {}, fetchImpl: async (url, init) => {
+    seen.push(url.split('/v1')[1]);
+    if (url.includes('/OLD/ad')) return new Response(JSON.stringify({ errors: [{ message: 'The campaign has ended.' }] }), { status: 409 });
+    if (url.endsWith('/ad_campaign')) return new Response('', { status: 201, headers: { Location: '/sell/marketing/v1/ad_campaign/NEW' } });
+    return new Response('', { status: 201 });
+  } });
+  assert.deepEqual([r2.ok, seen], [true, ['/ad_campaign/OLD/ad', '/ad_campaign', '/ad_campaign/NEW/ad']]);
+  assert.equal(db2.tables.ebay_accounts[0].promo_campaign_id, 'NEW');
 });

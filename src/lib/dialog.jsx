@@ -24,6 +24,10 @@ export const askConfirm = (message, { title = 'Please confirm', confirmLabel = '
 export const askValue = (message, { title = 'One more detail', confirmLabel = 'OK', cancelLabel = 'Cancel', placeholder = '', inputMode = 'text', initial = '' } = {}) =>
   open({ kind: 'value', message, title, confirmLabel, cancelLabel, placeholder, inputMode, initial });
 
+// Several named choices; resolves to the chosen value, or null when cancelled.
+export const askChoice = (message, choices, { title = 'Choose', cancelLabel = 'Cancel' } = {}) =>
+  open({ kind: 'choice', message, title, choices, cancelLabel });
+
 // Mount once, near the top of the app.
 export function DialogHost() {
   const [req, setReq] = useState(null);
@@ -54,7 +58,7 @@ export function DialogHost() {
   if (!req) return null;
 
   const yes = () => close(req.kind === 'value' ? value : true);
-  const no = () => close(req.kind === 'value' ? null : false);
+  const no = () => close(req.kind === 'confirm' ? false : null);
   const lines = String(req.message).split('\n');
 
   return (
@@ -66,15 +70,19 @@ export function DialogHost() {
         <div id="cd-dialog-message" style={{ fontSize: '0.9rem', lineHeight: 1.5 }}>
           {lines.map((l, i) => (l.trim() ? <p key={i} style={{ margin: '0 0 6px' }}>{l}</p> : null))}
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); yes(); }} style={{ marginTop: 14 }}>
+        <form onSubmit={(e) => { e.preventDefault(); if (req.kind !== 'choice') yes(); }} style={{ marginTop: 14 }}>
           {req.kind === 'value' && (
             <input ref={inputRef} className="bg-input" aria-label={req.message} value={value} placeholder={req.placeholder} inputMode={req.inputMode}
               onChange={(e) => setValue(e.target.value)} style={{ marginBottom: 14 }} />
           )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button type="button" className="btn-ghost" onClick={no} style={{ padding: '10px 16px' }}>{req.cancelLabel}</button>
-            <button type="submit" ref={confirmRef} className="btn-primary"
-              style={{ padding: '10px 18px', ...(req.danger ? { background: 'var(--accent)', boxShadow: '0 3px 0 #a33a29' } : {}) }}>{req.confirmLabel}</button>
+            {req.kind === 'choice' && req.choices.map((c, i) => (
+              <button key={c.value} type="button" ref={i === 0 ? confirmRef : undefined} className={i === req.choices.length - 1 ? 'btn-primary' : 'btn-ghost'}
+                onClick={() => close(c.value)} style={{ padding: '10px 16px' }}>{c.label}</button>
+            ))}
+            {req.kind !== 'choice' && <button type="submit" ref={confirmRef} className="btn-primary"
+              style={{ padding: '10px 18px', ...(req.danger ? { background: 'var(--accent)', boxShadow: '0 3px 0 #a33a29' } : {}) }}>{req.confirmLabel}</button>}
           </div>
         </form>
       </div>

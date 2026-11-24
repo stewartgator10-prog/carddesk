@@ -30,7 +30,7 @@ export async function listActiveListings(ctx) {
   if (!ctx.connected) return DEMO_LISTINGS;
   const { data, error } = await ctx.admin
     .from('ebay_listings')
-    .select('item_id, sku, title, price, quantity_available, image_url, view_url, listing_type, watch_count, start_time')
+    .select('item_id, sku, title, price, quantity_available, image_url, view_url, listing_type, watch_count, start_time, best_offer')
     .eq('user_id', ctx.userId)
     .eq('status', 'Active')
     .order('title');
@@ -45,7 +45,7 @@ export async function listActiveListings(ctx) {
     return {
       itemId: r.item_id, sku: r.sku, title: r.title, price: Number(r.price),
       quantity: r.quantity_available, image: r.image_url, url: r.view_url,
-      listingType: r.listing_type, watchers: r.watch_count, startTime: r.start_time,
+      listingType: r.listing_type, watchers: r.watch_count, startTime: r.start_time, bestOffer: r.best_offer ?? null,
       market: x?.market_price != null ? { price: Number(x.market_price), source: x.catalog_source, name: x.catalog_name, set: x.catalog_set, number: x.catalog_number, at: x.market_at } : null,
       comp: x?.comp_at ? { low: x.comp_low != null ? Number(x.comp_low) : null, median: x.comp_median != null ? Number(x.comp_median) : null, count: x.comp_count || 0, items: x.comp_items || [], at: x.comp_at } : null,
       card: x?.parsed ? { name: x.parsed.card_name, number: x.parsed.collector_number, language: x.parsed.language, isSingle: x.parsed.is_single_card } : null,
@@ -59,7 +59,7 @@ export async function recordPriceChanges(ctx, results, changes) {
   const ok = results.filter(r => r.ok);
   if (ok.length) {
     await Promise.all(ok.map(r => ctx.admin.from('ebay_listings')
-      .update({ price: r.price }).eq('user_id', ctx.userId).eq('item_id', r.itemId)));
+      .update({ price: r.price, ...(r.bestOffer ? { best_offer: true } : {}) }).eq('user_id', ctx.userId).eq('item_id', r.itemId)));
   }
   await ctx.admin.from('price_changes').insert(results.map(r => {
     const c = byId.get(String(r.itemId)) || {};
