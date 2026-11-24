@@ -3,7 +3,7 @@ import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, Flask
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import CropImg from './lib/CropImg.jsx';
-import { buildTitle, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS } from '../netlify/lib/snap-logic.js';
+import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
 
@@ -13,7 +13,7 @@ const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const OPEN = ['uploaded', 'identifying', 'ready', 'needs_review', 'failed', 'approved', 'listed'];
 const DONE = ['approved', 'listed'];
 // Editing any of these after the eBay check means the check no longer describes the listing.
-const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction'];
+const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction', 'description'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 const STATUS = {
@@ -344,6 +344,7 @@ function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetr
   const field = (k, v) => setD((x) => ({ ...x, [k]: v }));
   const commit = (patch) => onSave(it.id, patch);
   const rebuildTitle = () => { const t = buildTitle(d); field('title', t); commit({ title: t }); };
+  const rebuildDescription = () => { const t = buildDescription(d); field('description', t); commit({ description: t }); };
   const inp = { padding: '6px 8px', fontSize: '0.8rem' };
 
   return (
@@ -435,6 +436,12 @@ function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetr
           <div style={{ gridColumn: 'span 2', display: 'flex', gap: 4 }}>
             <input className="bg-input" style={{ ...inp, flex: 1 }} value={d.title || ''} placeholder="eBay title" maxLength={80} onChange={(e) => field('title', e.target.value)} onBlur={() => commit({ title: d.title })} />
             <button className="btn-icon" title="Rebuild title from the fields" onClick={rebuildTitle}><RefreshCw size={13} /></button>
+          </div>
+          <div className="ink-faint" style={{ gridColumn: 'span 2', fontSize: '0.65rem', marginTop: -2 }}>Title {String(d.title || '').length}/80{String(d.title || '').length < 70 ? ' · aim for 70 to 80' : ''}</div>
+          <div style={{ gridColumn: 'span 2', display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+            <textarea className="bg-input" style={{ ...inp, flex: 1, minHeight: 92, resize: 'vertical', lineHeight: 1.4 }} value={d.description || ''} placeholder="eBay description" aria-label="eBay description"
+              onChange={(e) => field('description', e.target.value)} onBlur={() => commit({ description: d.description })} />
+            <button className="btn-icon" title="Rewrite the description from the fields" onClick={rebuildDescription}><RefreshCw size={13} /></button>
           </div>
           <div style={{ gridColumn: 'span 2', display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.75rem' }}>
             <span className="ink-faint">Price $</span>
@@ -788,8 +795,6 @@ function ListingSetup({ s, set }) {
         ))}
         <div className="ink-faint" style={{ gridColumn: '1 / -1', fontSize: '0.7rem' }}>The package each card ships in. eBay needs it to work out calculated shipping. Check the card again after changing it.</div>
       </div>
-      <div><label htmlFor="desc-footer">Note added to every description (optional)</label>
-        <textarea id="desc-footer" className="bg-input" rows={3} value={s.snapDescriptionFooter || ''} placeholder="e.g. Ships in a penny sleeve and top loader within 3 business days." onChange={(e) => set('snapDescriptionFooter', e.target.value)} /></div>
     </div>
   );
 }

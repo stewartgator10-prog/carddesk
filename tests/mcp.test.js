@@ -84,7 +84,8 @@ test('reprice from market and edits: limits enforced, title rebuilt, stale eBay 
   assert.equal(db.tables.snap_items[0].publish_state, null);              // price changed: check no longer valid
 
   const u = await updateCards(ctx(db), { updates: [{ id: 'c1', condition: 'LP' }, { id: 'c2', price: 0.5 }, { id: 'c1', cost: 1.25 }] });
-  assert.equal(u.results[0].card.title, 'Fuecoco 035/193 Paldea Evolved Reverse Holo LP');
+  assert.match(u.results[0].card.title, /^Fuecoco 035\/193 \| Pokemon TCG Paldea Evolved \| /);
+  assert.doesNotMatch(u.results[0].card.title, /\bLP\b/);                         // no condition grade in titles
   assert.match(u.results[1].error, /between \$0.99/);
   assert.equal(db.tables.snap_items[0].cost_basis, 1.25);
   await assert.rejects(repriceCards(ctx(db), { ids: ['c1'], markup_pct: 5000 }), /between -90 and 1000/);

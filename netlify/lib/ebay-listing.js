@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { tradingCall } from './trading-price.js';
 import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths, LISTABLE_GAMES, GAME_LABELS } from './snap-logic.js';
+import { buildDescription } from './listing-copy.js';
 import { getAppToken } from './ebay-browse.js';
 
 export const CCG_CATEGORY = '183454'; // CCG Individual Cards (Pokémon, Magic, ...)
@@ -196,15 +197,10 @@ export function buildSpecifics(item, tpl, { tplGame = item.game, templates = nul
   return [...want.entries()].map(([name, values]) => ({ name, values }));
 }
 
-export function buildDescription(item, footer = '') {
-  const rows = [
-    ['Card', item.card_name], ['Set', item.catalog_set || item.set_name], ['Number', item.catalog_number || item.collector_number],
-    ['Rarity', ['pokemon', 'mtg'].includes(item.game) ? null : item.rarity], ['Finish', FINISH[item.finish]], ['Condition', { NM: 'Near Mint', LP: 'Lightly Played', MP: 'Moderately Played', HP: 'Heavily Played', DMG: 'Damaged' }[item.condition] || item.condition],
-    ['Language', item.language],
-  ].filter(([, v]) => v);
-  const misprint = item.misprint_confirmed && item.misprint_notes ? `<p><b>Misprint:</b> ${esc(item.misprint_notes)}</p>` : '';
-  const foot = String(footer || '').trim().split(/\n{2,}/).filter(Boolean).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
-  return `<h3>${esc(item.title)}</h3><ul>${rows.map(([k, v]) => `<li><b>${esc(k)}:</b> ${esc(v)}</li>`).join('')}</ul>${misprint}<p>The photos show the actual card you will receive.</p>${foot}`;
+// The description is the seller's prose (edited on the card), or written from the card's details.
+export function descriptionHtml(item) {
+  const text = String(item.description || '').trim() || buildDescription(item);
+  return text.split(/\n{2,}/).map((p) => `<p>${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
 }
 
 export function bestOfferPrices(price, bo) {
@@ -229,7 +225,7 @@ export const snapSku = (snapId) => `SNAP-${String(snapId).replace(/-/g, '').slic
 export function listingSignature(item) {
   return crypto.createHash('sha256').update(JSON.stringify([item.title, Number(item.price), item.condition, item.finish, item.card_name,
     item.catalog_set || item.set_name, item.catalog_number || item.collector_number, item.misprint_confirmed, item.ebay_picture_urls || [],
-    item.game || null, item.rarity || null, item.extraction?.game_name || null])).digest('hex').slice(0, 16);
+    item.game || null, item.rarity || null, item.extraction?.game_name || null, item.description || null])).digest('hex').slice(0, 16);
 }
 
 // The shipping package: calculated shipping needs its weight and size. The seller's numbers from
@@ -262,7 +258,7 @@ export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
   return [
     '<Item>',
     `<Title>${esc(String(item.title).slice(0, 80))}</Title>`,
-    `<Description>${cdata(buildDescription(item, settings.snapDescriptionFooter))}</Description>`,
+    `<Description>${cdata(descriptionHtml(item))}</Description>`,
     `<PrimaryCategory><CategoryID>${esc(tpl.categoryId || CCG_CATEGORY)}</CategoryID></PrimaryCategory>`,
     `<StartPrice currencyID="USD">${money(price)}</StartPrice>`,
     `<ConditionID>${UNGRADED_CONDITION}</ConditionID>`,
