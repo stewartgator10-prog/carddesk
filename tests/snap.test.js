@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import Anthropic from '@anthropic-ai/sdk';
-import { suggestPrice, buildTitle, applyIdentification, scoreTrial, summarizeTrial, titleNumber } from '../netlify/lib/snap-logic.js';
+import { suggestPrice, buildTitle, buildDescription, applyIdentification, scoreTrial, summarizeTrial, titleNumber } from '../netlify/lib/snap-logic.js';
 import { splitNumber, pokemonPrice, mtgPrice, lookupPokemon, lookupMtg } from '../netlify/lib/card-catalog.js';
 import { costOf, checkBudget, usageRow } from '../netlify/lib/ai-usage.js';
 import { readCard, buildRequest } from '../netlify/lib/card-vision.js';
@@ -14,7 +14,7 @@ import { fakeDb } from './fake-db.js';
 const U = 'u1';
 const read = (over = {}) => ({
   is_trading_card: true, game: 'pokemon', card_name: 'Fuecoco', collector_number: '035/193', set_name: null, set_code: null,
-  language: 'English', finish: 'reverse_holo', variant: null, rarity: null, game_name: null, graded: false, condition_guess: 'unknown',
+  language: 'English', finish: 'reverse_holo', variant: null, rarity: null, game_name: null, art_description: null, flavor_text: null, condition_notes: null, grader: null, grade: null, graded: false, condition_guess: 'unknown',
   possible_misprint: false, misprint_notes: null, confidence: 0.95, notes: null, ...over,
 });
 const catalog = (over = {}) => ({ source: 'tcgdex', id: 'sv02-035', name: 'Fuecoco', setName: 'Paldea Evolved', number: '035/193', imageUrl: 'x', url: 'y', marketPrice: 0.27, priceKey: 'reverse-holofoil', matchLevel: 'exact', ...over });
@@ -29,20 +29,60 @@ test('pricing: floor for bulk, rounds up to the chosen ending, markup applies', 
   assert.equal(suggestPrice(null), null);
 });
 
-test('titles follow the seller style and fit eBay\'s 80 characters', () => {
-  assert.equal(buildTitle({ game: 'pokemon', card_name: 'Noctowl', variant: 'Poke Ball Pattern', catalog_number: '078/131', catalog_set: 'Prismatic Evolutions', finish: 'holo', condition: 'NM' }),
-    'Noctowl (Poke Ball Pattern) 078/131 Prismatic Evolutions Holo');
-  assert.equal(buildTitle({ game: 'mtg', card_name: 'Shivan Dragon', catalog_number: '22', catalog_set: 'Welcome Deck 2017', finish: 'normal', condition: 'LP' }),
-    'Shivan Dragon (22) Welcome Deck 2017 Regular Magic The Gathering LP');
-  assert.match(buildTitle({ game: 'pokemon', card_name: 'Lunala GX', catalog_number: '141/149', catalog_set: 'Sun & Moon', finish: 'holo', misprint_confirmed: true, misprint_notes: 'visible texture shift on the art' }), /^Texture Shift Misprint Lunala GX/);
-  assert.ok(buildTitle({ game: 'pokemon', card_name: 'X'.repeat(70), catalog_number: '1/2', catalog_set: 'A Very Long Set Name', finish: 'holo' }).length <= 80);
+test('titles: Name Number | Game Set | Key Attribute, pipes only, 70-80 characters of true facts', () => {
+  const t = (over) => buildTitle({ condition: 'NM', ...over });
+  assert.equal(t({ game: 'pokemon', card_name: 'Noctowl', variant: 'Poke Ball Pattern', catalog_number: '078/131', catalog_set: 'Prismatic Evolutions', finish: 'holo' }),
+    'Noctowl 078/131 | Pokemon Prismatic Evolutions | Holo Poke Ball Pattern');                   // stamp is the key attribute, last
+  // Played copies: no condition grade in the title.
+  const shivan = t({ game: 'mtg', card_name: 'Shivan Dragon', catalog_number: '22', catalog_set: 'Welcome Deck 2017', rarity: 'rare', finish: 'normal', condition: 'LP' });
+  assert.equal(shivan, 'Shivan Dragon #22 | Magic The Gathering Welcome Deck 2017 | English Rare');
+  assert.doesNotMatch(shivan, /\bLP\b/);
+  // Errors: the exact phrase, never a severity, every confirmed error named.
+  const lunala = t({ game: 'pokemon', card_name: 'Lunala GX', catalog_number: '141/149', catalog_set: 'Sun & Moon', finish: 'holo', misprint_confirmed: true, misprint_notes: 'minimal texture shift on the art and a crimp at the top' });
+  assert.match(lunala, /^Lunala GX 141\/149 \| /);
+  assert.match(lunala, /Crimp Error Texture Shift Misprint$|Texture Shift Misprint/);
+  assert.match(lunala, /Crimp Error/);
+  assert.doesNotMatch(lunala, /minimal|moderate/i);
+  // Graded: grader + grade in the title.
+  assert.match(t({ game: 'pokemon', card_name: 'Charizard', catalog_number: '4/102', catalog_set: 'Base Set', finish: 'holo', graded: true, extraction: { graded: true, grader: 'psa', grade: '8' } }), /\| [^|]*PSA 8$/);
+  // Never an em dash, always within 80, and 70+ whenever there are enough true facts.
+  for (const x of [
+    { game: 'yugioh', card_name: 'Ash Blossom & Joyous Spring', catalog_number: 'RA01-EN008', catalog_set: '25th Anniversary Rarity Collection', rarity: 'Ultra Rare', variant: '1st Edition' },
+    { game: 'one_piece', card_name: 'Monkey.D.Luffy', variant: 'Alternate Art', catalog_number: 'OP05-119', catalog_set: 'Awakening of the New Era', rarity: 'SEC' },
+    { game: 'pokemon', card_name: 'Fuecoco', catalog_number: '035/193', catalog_set: 'Paldea Evolved', rarity: 'Common', finish: 'reverse_holo' },
+    { game: 'pokemon', card_name: 'X'.repeat(70), catalog_number: '1/2', catalog_set: 'A Very Long Set Name', finish: 'holo' },
+  ]) {
+    const title = t(x);
+    assert.ok(title.length <= 80, title);
+    assert.doesNotMatch(title, /[—–]/);
+    if (!x.card_name.startsWith('XXX')) assert.ok(title.length >= 70, `${title} (${title.length})`);
+  }
+  assert.equal(t({ game: 'yugioh', card_name: 'Ash Blossom & Joyous Spring', catalog_number: 'RA01-EN008', catalog_set: '25th Anniversary Rarity Collection', rarity: 'Ultra Rare', variant: '1st Edition' }),
+    'Ash Blossom & Joyous Spring RA01-EN008 | Yu-Gi-Oh! | Ultra Rare 1st Edition');            // the set code already names the set
+});
+
+test('descriptions: prose about the card, condition in plain words, no price, shipping or boilerplate', () => {
+  const d = buildDescription({ game: 'yugioh', card_name: "Queen's Knight", catalog_number: 'EEN-EN004', catalog_set: 'Elemental Energy', rarity: 'Rare', finish: 'foil', condition: 'LP',
+    misprint_confirmed: true, misprint_notes: 'moderate texture shift across the artwork',
+    extraction: { art_description: 'A knight in red and gold armor raises a sword and shield against a burst of white light.', flavor_text: null, condition_notes: 'scratching on the back' } });
+  assert.equal(d, "This is Queen's Knight (EEN-EN004) from the Yu-Gi-Oh! Elemental Energy set, a Rare printing. A knight in red and gold armor raises a sword and shield against a burst of white light. "
+    + 'This copy shows a Texture Shift Misprint, texture shift across the artwork. Lightly played copy, scratching on the back. Please look closely at the photos to judge the condition for yourself.');
+  const sentences = d.split(/(?<=[.!?])\s+/).length;
+  assert.ok(sentences >= 4 && sentences <= 6, sentences);
+  assert.doesNotMatch(d, /moderate|\$|price|ship|front, back|<li>|:\s*\n/i);
+  const slab = buildDescription({ game: 'pokemon', card_name: 'Charizard', catalog_number: '4/102', catalog_set: 'Base Set', finish: 'holo', condition: 'NM', graded: true,
+    extraction: { graded: true, grader: 'PSA', grade: '8', flavor_text: 'Spits fire that is hot enough to melt boulders.' } });
+  assert.match(slab, /from the Pokemon Base Set, a holo printing\. The flavor text reads: "Spits fire that is hot enough to melt boulders\." Graded PSA 8/);
+  assert.doesNotMatch(slab, /Base Set set/);
 });
 
 test('identification: clean match is ready; problems go to review with reasons', () => {
   const ok = applyIdentification({ read: read(), catalog: catalog() });
   assert.equal(ok.status, 'ready');
   assert.equal(ok.price, 0.99);
-  assert.equal(ok.title, 'Fuecoco 035/193 Paldea Evolved Reverse Holo');
+  assert.equal(ok.title, buildTitle(ok));
+  assert.match(ok.title, /^Fuecoco 035\/193 \| Pokemon/);
+  assert.match(ok.description, /^This is Fuecoco \(035\/193\)/);
 
   const r = applyIdentification({ read: read({ confidence: 0.5, possible_misprint: true, language: 'Japanese' }), catalog: null, duplicateItemId: '111' });
   assert.equal(r.status, 'needs_review');

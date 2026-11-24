@@ -11,7 +11,7 @@ import { fakeDb } from './fake-db.js';
 
 const U = 'u1';
 const read = (over = {}) => ({ is_trading_card: true, game: 'yugioh', card_name: 'Ash Blossom & Joyous Spring', collector_number: 'RA01-EN008', set_name: null, set_code: 'RA01',
-  language: 'English', finish: 'foil', variant: null, rarity: null, game_name: null, graded: false, condition_guess: 'NM', possible_misprint: false, misprint_notes: null, confidence: 0.95, notes: null, ...over });
+  language: 'English', finish: 'foil', variant: null, rarity: null, game_name: null, art_description: null, flavor_text: null, condition_notes: null, grader: null, grade: null, graded: false, condition_guess: 'NM', possible_misprint: false, misprint_notes: null, confidence: 0.95, notes: null, ...over });
 
 // A stand-in for the catalog sites: answers by URL, and records what was asked.
 function fakeWeb(routes) {
@@ -130,7 +130,7 @@ const ygoCatalog = (over = {}) => ({ source: 'tcgcsv', id: '2', name: 'Ash Bloss
 test('review: a confirmed Yu-Gi-Oh! card is ready; versions, other games, other languages and sports are held with the reason', () => {
   const ok = applyIdentification({ read: read({ variant: '1st Edition' }), catalog: ygoCatalog() });
   assert.deepEqual([ok.status, ok.review_reasons, ok.market_price, ok.price, ok.rarity, ok.game], ['ready', [], 2.33, 2.89, 'Ultra Rare', 'yugioh']);
-  assert.equal(ok.title, 'Ash Blossom & Joyous Spring (1st Edition) RA01-EN008 Ultra Rare Yu-Gi-Oh');             // set name dropped to fit 80 characters
+  assert.equal(ok.title, 'Ash Blossom & Joyous Spring RA01-EN008 | Yu-Gi-Oh! | Ultra Rare 1st Edition');
   assert.ok(ok.title.length <= 80);
 
   const versions = applyIdentification({ read: read(), catalog: ygoCatalog({ versions: 7, marketPrice: null, rarity: null, matchLevel: 'number' }), ebayMedian: 4.2 });
@@ -140,7 +140,7 @@ test('review: a confirmed Yu-Gi-Oh! card is ready; versions, other games, other 
   const digimon = applyIdentification({ read: read({ game: 'other', game_name: 'Digimon Card Game', card_name: 'Agumon', collector_number: 'BT1-010' }), catalog: null, ebayMedian: 1.5 });
   assert.deepEqual(digimon.review_reasons.sort(), ['ebay_median', 'other_game']);                                    // no "not in catalog": there is no catalog for it
   assert.equal(digimon.price, 1.89);
-  assert.equal(digimon.title, 'Agumon BT1-010 Digimon Card Game');
+  assert.equal(digimon.title, 'Agumon BT1-010 | Digimon Card Game | English Foil');
 
   // A Japanese card: the catalog price is for the English print, so eBay's price is used instead.
   const jp = applyIdentification({ read: read({ language: 'Japanese' }), catalog: ygoCatalog(), ebayMedian: 9 });
@@ -150,11 +150,12 @@ test('review: a confirmed Yu-Gi-Oh! card is ready; versions, other games, other 
   const sports = applyIdentification({ read: read({ game: 'sports', card_name: 'Some Player' }), catalog: null });
   assert.ok(sports.review_reasons.includes('sports_card') && !sports.review_reasons.includes('other_game'));
 
-  assert.equal(buildTitle({ game: 'one_piece', card_name: 'Monkey.D.Luffy', variant: 'Alternate Art', catalog_number: 'OP05-119', catalog_set: 'Awakening of the New Era', rarity: 'SEC', condition: 'NM' }),
-    'Monkey.D.Luffy (Alternate Art) OP05-119 Awakening of the New Era SEC One Piece');
+  assert.equal(buildTitle({ game: 'one_piece', card_name: 'Monkey.D.Luffy', variant: 'Alternate Art', catalog_number: 'OP05-119', catalog_set: 'Awakening of the New Era', rarity: 'SEC', condition: 'LP' }),
+    'Monkey.D.Luffy OP05-119 | One Piece Awakening of the New Era | Alternate Art');
   assert.equal(buildTitle({ game: 'lorcana', card_name: 'Elsa - Snow Queen', catalog_number: '53', collector_number: '53/204', catalog_set: 'Fabled', rarity: 'Uncommon', finish: 'foil', condition: 'NM' }),
-    'Elsa - Snow Queen 53/204 Fabled Uncommon Foil Lorcana');
-  assert.equal(buildTitle({ game: 'pokemon', card_name: 'Fuecoco', catalog_number: '035/193', catalog_set: 'Paldea Evolved', finish: 'reverse_holo', condition: 'NM' }), 'Fuecoco 035/193 Paldea Evolved Reverse Holo'); // unchanged
+    'Elsa - Snow Queen 53/204 | Disney Lorcana TCG Fabled | Uncommon English Foil');
+  assert.equal(buildTitle({ game: 'other', card_name: 'Agumon', collector_number: 'BT1-010', set_name: 'Release Special Booster', finish: 'normal', condition: 'NM', extraction: { game_name: 'Digimon Card Game' } }),
+    'Agumon BT1-010 | Digimon Card Game Release Special Booster | English');
 });
 
 const ebayItem = (title, price) => ({ title, price: { value: String(price) }, shippingOptions: [{ shippingCost: { value: '1' } }], buyingOptions: ['FIXED_PRICE'], seller: { username: 'someone' } });

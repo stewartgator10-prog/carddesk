@@ -102,7 +102,9 @@ test('listing XML: his category, condition code, specifics, location, policies b
   assert.match(xml, /<Name>Character<\/Name><Value>Fuecoco<\/Value>/);   // per-card value, not the template's "Briar"
   assert.doesNotMatch(xml, /Briar/);
   assert.match(xml, /<Name>Manufacturer<\/Name><Value>The Pokémon Company<\/Value>/); // static value copied
-  assert.match(xml, /Ships in a sleeve &amp; toploader\./);
+  assert.match(xml, /<Description><!\[CDATA\[<p>This is Fuecoco \(035\/193\) from the Pokemon Paldea Evolved set, a reverse holo printing\. Lightly played copy\. Please look closely at the photos/);
+  assert.doesNotMatch(xml, /Ships in a sleeve|The photos show the actual card|<li>/);                       // no shipping talk, boilerplate or spec list
+  assert.match(buildItemXml({ item: card({ description: 'My own words & more.' }), templates, settings: {}, pictureUrls: [] }), /<p>My own words &amp; more\.<\/p>/);
   assert.match(buildItemXml({ item: card({ price: 25 }), templates, settings: {}, pictureUrls: [] }), /<ShippingProfileID>274881268018</); // parcel at $20+
   assert.equal(listingUuid(card().id).length, 32);
 });

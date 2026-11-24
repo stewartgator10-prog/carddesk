@@ -3,7 +3,7 @@
 // Every tool acts as the signed-in seller and reuses the same rules as the app's screens:
 // the eBay check before publishing, the "this exact listing passed" signature, the monthly
 // AI budget, server-side price limits. Handlers are plain functions so they can be tested.
-import { buildTitle, suggestPrice, REVIEW_LABELS, listingPhotoPaths } from './snap-logic.js';
+import { buildTitle, buildDescription, suggestPrice, REVIEW_LABELS, listingPhotoPaths } from './snap-logic.js';
 import { checkSnapItem, publishSnapItem } from './ebay-listing.js';
 import { summarizePnl } from './pnl.js';
 import { monthStart, MODEL_LABELS } from './ai-usage.js';
@@ -148,7 +148,7 @@ export async function updateCards({ db, userId }, { updates }) {
       else { const c = Number(u.cost); if (!(c >= 0 && c <= 1_000_000)) { results.push({ id: u.id, ok: false, error: 'cost must be 0 or more' }); continue; } Object.assign(patch, { cost_basis: round2(c), cost_source: 'entered', purchase_id: null }); }
     }
     if (u.title !== undefined) patch.title = String(u.title).slice(0, 80);
-    else if (u.rebuild_title || ['card_name', 'catalog_set', 'catalog_number', 'finish', 'condition', 'misprint_confirmed'].some((k) => k in patch)) patch.title = buildTitle({ ...card, ...patch });
+    else if (u.rebuild_title || ['card_name', 'catalog_set', 'catalog_number', 'finish', 'condition', 'misprint_confirmed'].some((k) => k in patch)) { patch.title = buildTitle({ ...card, ...patch }); patch.description = buildDescription({ ...card, ...patch }); }
     const after = await patchCard(db, userId, card, patch);
     results.push({ id: u.id, ok: true, card: cardView(after) });
   }

@@ -9,7 +9,6 @@ export const SNAP_DEFAULTS = {
   snapEnding: '0.89',     // round up to this ending: '0.89' | '0.98' | '0.99' | '0.49' | 'cents'
   aiMonthlyBudget: 25,    // USD of estimated Claude spend per calendar month; 0 = no limit
   snapShipCutoff: 20,     // list price under this uses the envelope shipping policy, at or over it the parcel one
-  snapDescriptionFooter: '', // seller's own note added to every listing description (packaging, shipping...)
   // The package every card ships in. Calculated shipping policies need its weight and size.
   snapPackageWeightOz: 3,
   snapPackageLengthIn: 9,
@@ -53,50 +52,10 @@ export function suggestPrice(market, settings = {}) {
   return round2(p);
 }
 
-const FINISH_LABEL = { reverse_holo: 'Reverse Holo', holo: 'Holo', foil: 'Foil', normal: '', unknown: '' };
+// Titles and descriptions follow the seller's rules; see listing-copy.js.
+export { buildTitle, buildDescription } from './listing-copy.js';
+import { buildTitle, buildDescription } from './listing-copy.js';
 
-// Titles in the seller's existing style, capped at eBay's 80 characters.
-//   Pokémon: "Noctowl (Poke Ball Pattern) 078/131 Prismatic Evolutions Holo"
-//   Magic:   "Shivan Dragon (22) Welcome Deck 2017 Foil Magic The Gathering NM"
-export function buildTitle(item) {
-  const name = item.card_name || item.catalog_name || '';
-  const variant = item.variant ? ` (${item.variant})` : '';
-  const misprint = item.misprint_confirmed && item.misprint_notes ? `${shortMisprint(item.misprint_notes)} Misprint ` : '';
-  const set = item.catalog_set || item.set_name || '';
-  const finish = FINISH_LABEL[item.finish] || '';
-  // Lorcana prints "53/204"; its catalog only keeps the "53".
-  const num = item.game === 'lorcana' ? (item.collector_number || item.catalog_number) : (item.catalog_number || item.collector_number);
-  const worn = item.condition && item.condition !== 'NM' ? item.condition : '';
-  const join = (parts) => parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-  let parts;
-  if (item.game === 'mtg') {
-    parts = [`${misprint}${name}${variant}`, num ? `(${num})` : '', set, finish || 'Regular', 'Magic The Gathering', item.condition];
-  } else if (item.game === 'pokemon' || !item.game) {
-    parts = [`${misprint}${name}${variant}`, num, set, finish, worn];
-  } else {
-    // Other games: "Ash Blossom & Joyous Spring RA01-EN008 25th Anniversary Rarity Collection Ultra Rare Yu-Gi-Oh"
-    const game = { yugioh: 'Yu-Gi-Oh', one_piece: 'One Piece', lorcana: 'Lorcana' }[item.game] || item.extraction?.game_name || '';
-    const lead = `${misprint}${name}${variant}`;
-    const tail = [item.game === 'lorcana' ? finish : '', game, worn];
-    // When it runs past eBay's 80 characters, the set name goes first, then the rarity.
-    for (const middle of [[num, set, item.rarity], [num, item.rarity], [num]]) {
-      parts = [lead, ...middle, ...tail];
-      if (join(parts).length <= 80) break;
-    }
-  }
-  const full = join(parts);
-  return full.length <= 80 ? full : full.slice(0, 80).replace(/\s+\S*$/, '');
-}
-
-function shortMisprint(notes) {
-  const n = String(notes).toLowerCase();
-  if (n.includes('texture')) return 'Texture Shift';
-  if (n.includes('grid')) return 'Print Grid';
-  if (n.includes('crimp')) return 'Crimped';
-  if (n.includes('miscut') || n.includes('off-center') || n.includes('off center')) return 'Off Center';
-  if (n.includes('ink')) return 'Ink Error';
-  return 'Possible';
-}
 
 export const REVIEW_LABELS = {
   low_confidence: 'AI unsure',
@@ -181,6 +140,7 @@ export function applyIdentification({ read, catalog, settings = {}, duplicateIte
     error: null,
   };
   item.title = buildTitle({ ...item, misprint_confirmed: false });
+  item.description = buildDescription({ ...item, misprint_confirmed: false });
   return item;
 }
 

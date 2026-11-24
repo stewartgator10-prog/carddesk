@@ -8,7 +8,7 @@ import { ebayMedianFor } from './market.js';
 import { usageRow, logUsage, checkBudget } from './ai-usage.js';
 import { loadSnapSettings, BudgetError } from './snap-identify.js';
 import { splitCost } from './cost-split.js';
-import { applyIdentification, suggestPrice, buildTitle, CONFIDENCE_OK, CATALOG_GAMES } from './snap-logic.js';
+import { applyIdentification, suggestPrice, buildTitle, buildDescription, CONFIDENCE_OK, CATALOG_GAMES } from './snap-logic.js';
 import { tiersFrom, marketOf, offerTotals } from './offer-logic.js';
 
 async function must(p) { const { data, error } = await p; if (error) throw new Error(error.message); return data; }
@@ -120,6 +120,7 @@ export async function acceptOffer({ db, userId, offerId, finalOffer = null }) {
     if (it.source === 'page') snap.review_reasons = [...snap.review_reasons, 'page_photo'];
     snap.status = snap.review_reasons.length ? 'needs_review' : 'ready';
     snap.title = buildTitle({ ...snap, misprint_confirmed: false });
+    snap.description = buildDescription({ ...snap, misprint_confirmed: false });
     const snapId = crypto.randomUUID();
     await must(db.from('snap_items').insert({
       ...snap, id: snapId, user_id: userId, batch_id: batch, photo_path: it.photo_path, photo_crop: it.source === 'page' ? it.box : null,

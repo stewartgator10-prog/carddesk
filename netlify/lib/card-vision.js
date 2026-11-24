@@ -20,7 +20,12 @@ export const CardRead = z.object({
   variant: z.string().nullable(),
   rarity: z.string().nullable(),
   game_name: z.string().nullable(),
+  art_description: z.string().nullable(),
+  flavor_text: z.string().nullable(),
+  condition_notes: z.string().nullable(),
   graded: z.boolean(),
+  grader: z.string().nullable(),
+  grade: z.string().nullable(),
   condition_guess: z.enum(['NM', 'LP', 'MP', 'HP', 'DMG', 'unknown']),
   possible_misprint: z.boolean(),
   misprint_notes: z.string().nullable(),
@@ -43,7 +48,10 @@ Report only what you can read or clearly see. Never invent a value: use null whe
 - language: the card's language in English, for example "English" or "Japanese".
 - finish: "reverse_holo" when the foil pattern covers the card body but not the artwork; "holo" when the artwork itself is foil; "foil" for a foil Magic card; "normal" when nothing is foil; "unknown" when the photo can't show it.
 - variant: printed variations that change value, for example "Poke Ball Pattern", "Master Ball Pattern", "Borderless", "Showcase", "Extended Art", "1st Edition", "Shadowless", "Promo". Otherwise null.
-- graded: true if the card is inside a grading slab.
+- graded: true if the card is inside a grading slab. grader and grade: as printed on the slab label, for example "PSA" and "8", or "BGS" and "9.5"; otherwise null.
+- art_description: one or two plain sentences on what the artwork shows: what is pictured, what it is doing, the main colors and the art style. Only what you can see; do not name characters, places or abilities unless they are printed on the card. Null if the artwork isn't visible.
+- flavor_text: the card's flavor text (usually italic, separate from game rules and attacks) exactly as printed, only if you can read all of it. Never game rules, attacks or abilities. Otherwise null.
+- condition_notes: visible wear in a few plain words, for example "light whitening on the back corners" or "a scratch across the artwork". Null if none is visible or the photo can't show it.
 - condition_guess: only from visible wear; "unknown" if the photo can't show the edges and surface.
 - possible_misprint: true only for visible evidence such as texture shift, print grid lines, a crimp, ink smear or missing ink, a miscut, or heavy off-centering. Describe what you see in misprint_notes. Do not flag ordinary holo patterns or photo glare.
 - confidence: from 0 to 1, how sure you are that card_name and collector_number are both right.
