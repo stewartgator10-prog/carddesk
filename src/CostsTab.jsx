@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader, Download, Receipt, X, Trash2, Calculator } from 'lucide-react';
 import { supabase, apiFetch } from './lib/supabase.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
+import { askConfirm } from './lib/dialog.jsx';
 
 const money = (n) => (n == null || n === '' || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(2)}`);
 const SOURCE = { entered: ['typed', 'var(--ink-dim)'], purchase: ['purchase', 'var(--info)'], estimated: ['est.', 'var(--warn)'] };
@@ -237,7 +238,7 @@ export default function CostsTab({ settings }) {
                   <div style={{ fontSize: '0.8rem', minWidth: 0, overflowWrap: 'anywhere' }}>{p.source || 'Purchase'}{p.notes ? <span className="ink-faint"> · {p.notes}</span> : null}
                     <div className="ink-faint" style={{ fontSize: '0.65rem' }}>{p.purchased_at} · split {p.split_method === 'even' ? 'evenly' : 'by market value'} · {n} card{n === 1 ? '' : 's'} in stock</div></div>
                   <div style={{ textAlign: 'right', fontWeight: 600 }}>{money(p.total_paid)}</div>
-                  <button className="btn-icon" title="Delete purchase (its cards lose their cost)" onClick={() => window.confirm('Delete this purchase? Its cards go back to having no cost.') && run('del', { action: 'delete_purchase', id: p.id }, (r) => `Purchase deleted; ${r.cleared} card costs cleared.`)}><Trash2 size={14} /></button>
+                  <button className="btn-icon" title="Delete purchase (its cards lose their cost)" onClick={async () => (await askConfirm('Delete this purchase? Its cards go back to having no cost.', { title: 'Delete purchase', confirmLabel: 'Delete purchase', danger: true })) && run('del', { action: 'delete_purchase', id: p.id }, (r) => `Purchase deleted; ${r.cleared} card costs cleared.`)}><Trash2 size={14} /></button>
                 </div>
               );
             })}

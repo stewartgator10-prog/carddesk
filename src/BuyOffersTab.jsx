@@ -4,6 +4,7 @@ import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import CropImg from './lib/CropImg.jsx';
 import { offerOf, marketOf, offerTotals, tiersFrom, OFFER_FLAG_LABELS } from '../netlify/lib/offer-logic.js';
+import { askConfirm } from './lib/dialog.jsx';
 
 const money = (n) => (n == null || n === '' || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(2)}`);
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
@@ -118,7 +119,8 @@ function OfferDetail({ offer, userId, tiers, settings, setSettings, onBack, onCh
 
   async function accept() {
     const paid = finalOffer === '' ? totals.offer : Number(finalOffer);
-    if (!window.confirm(`Record this deal?\n\nPaid: $${paid.toFixed(2)} for ${totals.cards} cards (market $${totals.market.toFixed(2)}).\n\nCreates a purchase split across the cards by market value and puts the cards in the Snap to List queue.`)) return;
+    if (!(await askConfirm(`Record this deal?\n\nPaid: $${paid.toFixed(2)} for ${totals.cards} cards (market $${totals.market.toFixed(2)}).\n\nCreates a purchase split across the cards by market value and puts the cards in the Snap to List queue.`,
+      { title: 'Record the deal', confirmLabel: 'Record deal' }))) return;
     const r = await postJson('/api/buy-offer', { action: 'accept', offerId: offer.id, finalOffer: finalOffer === '' ? null : Number(finalOffer) });
     if (!r.ok) { setMsg({ type: 'error', text: r.data.error || `Failed (${r.status})` }); return; }
     setStatus('accepted'); setSheet(false); onChanged();

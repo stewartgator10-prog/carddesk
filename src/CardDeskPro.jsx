@@ -27,6 +27,7 @@ const BuyOffersTab = lazy(() => import('./BuyOffersTab.jsx'));
 import { SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
 import { OFFER_DEFAULTS } from '../netlify/lib/offer-logic.js';
 import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
+import { DialogHost } from './lib/dialog.jsx';
 
 const DEFAULT_SETTINGS = {
   ebayFeePct: 13.25,
@@ -782,6 +783,7 @@ export default function CardDeskPro({ session }) {
         )}
       </main>
       <footer className="page-foot quiet">CardDesk, noon.</footer>
+      <DialogHost />
 
       {sellingId && (
         <div onClick={() => setSellingId(null)} style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
