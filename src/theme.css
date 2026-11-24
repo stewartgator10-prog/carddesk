@@ -156,6 +156,7 @@ a { color: var(--info); }
   background: var(--well); color: var(--ink-dim); transition: background 0.3s ease, color 0.3s ease, transform 0.6s var(--spring);
 }
 .tab-btn:hover { color: var(--ink); background: var(--row-hover); }
+.tab-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-family: var(--font-ui); font-size: 0.7rem; font-weight: 800; display: inline-grid; place-items: center; }
 .tab-btn:hover .hex { transform: rotate(30deg) scale(1.06); }
 .tab-btn:active { transform: scale(0.96); }
 .tab-btn.active { color: var(--ink); background: #fff; border-color: var(--ink); box-shadow: 0 2px 0 var(--ink); }
