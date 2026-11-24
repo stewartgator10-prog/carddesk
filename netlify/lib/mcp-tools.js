@@ -111,7 +111,7 @@ export async function profitReport({ db, userId }, { days = 30 } = {}) {
     sales_missing_cost: s.missing_cost, sales_with_estimated_cost: rows.filter((r) => r.cost_estimated && r.profit != null).length,
     best_sales: withProfit.slice(0, 5).map(brief),
     worst_sales: withProfit.slice(-5).reverse().map(brief),
-    note: s.missing_cost ? 'Profit only counts sales whose card cost is known; the rest are listed in sales_missing_cost. Costs can be added on the Costs tab.' : undefined,
+    note: s.missing_cost ? 'Profit only counts sales whose card cost is known; the rest are listed in sales_missing_cost. Costs can be added in Inventory → Costs.' : undefined,
   };
 }
 

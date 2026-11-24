@@ -16,7 +16,7 @@ async function ebayError(res) {
 }
 
 const needsReconnect = (e) => e.status === 401 || e.status === 403 || /scope|insufficient|access denied|not authorized/i.test(e.message);
-export const RECONNECT_FOR_PROMO = 'Promotion needs one more eBay permission: reconnect eBay on the eBay Listings tab, then publish again.';
+export const RECONNECT_FOR_PROMO = 'Promotion needs one more eBay permission: reconnect eBay in Listings & Prices → eBay account, then publish again.';
 
 export const promoRate = (settings = {}) => {
   const n = Number(settings.snapPromotePct ?? 2);

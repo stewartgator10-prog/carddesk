@@ -770,7 +770,7 @@ function ListingSetup({ s, set }) {
       <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>EBAY LISTING SETUP</h3>
       <div className="ink-dim" style={{ fontSize: '0.75rem' }}>New listings copy the setup of your own newest card listings (Yu-Gi-Oh!, One Piece, Lorcana and other games borrow it, with their own game details): category, condition codes, item details, ship-from location, return and payment policies, and Best Offer %.</div>
       {state.loading ? <Loader size={14} className="spin ink-faint" /> : !state.connected ? (
-        <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Connect your eBay account on the eBay Listings tab first.</div>
+        <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Connect your eBay account in Listings & Prices → eBay account first.</div>
       ) : (
         <>
           {t ? (
@@ -798,7 +798,7 @@ function ListingSetup({ s, set }) {
         <div><label htmlFor="promo-pct">Promoted Listings ad rate %</label><input id="promo-pct" className="bg-input" type="number" step="0.1" min="0" max="20" value={s.snapPromotePct ?? 2} onChange={(e) => set('snapPromotePct', e.target.value === '' ? 0 : Number(e.target.value))} /></div>
         <div className="ink-faint" style={{ gridColumn: '1 / -1', fontSize: '0.7rem' }}>
           Best Offer: offers at {100 - (Number(s.snapBestOfferPct) || 10)}% of the price or more are accepted automatically, lower ones declined (a $10.00 card accepts $9.00 and up). Turn it off per listing in the Repricer.
-          {' '}Promotion: each new listing joins your CardDesk Promoted Listings campaign; eBay charges the ad rate only when a promoted listing sells. 0 turns it off. The first time, reconnect eBay (eBay Listings tab) to allow promotions.
+          {' '}Promotion: each new listing joins your CardDesk Promoted Listings campaign; eBay charges the ad rate only when a promoted listing sells. 0 turns it off. The first time, reconnect eBay (Listings & Prices → eBay account) to allow promotions.
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
