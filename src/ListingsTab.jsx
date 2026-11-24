@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ExternalLink, Link2, Loader, Unlink, Store } from 'lucide-react';
 import { supabase } from './lib/supabase.js';
+import { askConfirm } from './lib/dialog.jsx';
 
 const fmt = (n, cur = 'USD') =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || 'USD' }).format(n);
@@ -92,7 +93,7 @@ export default function ListingsTab() {
   }
 
   async function disconnect() {
-    if (!window.confirm('Disconnect eBay? This removes the saved sign-in and the listing snapshot from CardDesk. Nothing changes on eBay.')) return;
+    if (!(await askConfirm('Disconnect eBay? This removes the saved sign-in and the listing snapshot from CardDesk. Nothing changes on eBay.', { title: 'Disconnect eBay', confirmLabel: 'Disconnect eBay', danger: true }))) return;
     setBusy('disconnect'); setError(null);
     try { apply(await api('DELETE')); setNotice('eBay disconnected.'); }
     catch (e) { setError(e.message); }

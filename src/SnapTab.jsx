@@ -6,6 +6,7 @@ import CropImg from './lib/CropImg.jsx';
 import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
+import { askConfirm, askValue } from './lib/dialog.jsx';
 
 const money = (n, d = 2) => (n == null || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(d)}`);
 const fee = (n) => (n == null ? '—' : Number(n) < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
@@ -230,7 +231,8 @@ export default function SnapTab({ userId, settings, setSettings }) {
     if (!list.length) return;
     const fees = list.reduce((t, i) => t + Number(i.publish_check?.fees?.total || 0), 0);
     const value = list.reduce((t, i) => t + Number(i.price || 0), 0);
-    if (!window.confirm(`Publish ${list.length} listing${list.length === 1 ? '' : 's'} on eBay now?\n\nTotal list price: $${value.toFixed(2)}\nListing fees from eBay's check: $${fees.toFixed(2)}\n\nThey go live immediately as Buy It Now (Good 'Til Cancelled).`)) return;
+    if (!(await askConfirm(`Publish ${list.length} listing${list.length === 1 ? '' : 's'} on eBay now?\n\nTotal list price: $${value.toFixed(2)}\nListing fees from eBay's check: $${fees.toFixed(2)}\n\nThey go live immediately as Buy It Now (Good 'Til Cancelled).`,
+      { title: 'Publish to eBay', confirmLabel: `Publish ${list.length} to eBay` }))) return;
     const { ok, problems } = await ebayLoop('Publishing to eBay', list, 'publish');
     setMsg(problems.length ? { type: 'error', text: `${ok} listed, ${problems.length} failed: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `${ok} card${ok === 1 ? '' : 's'} listed on eBay and added to inventory with their cost.` });
   }
@@ -239,7 +241,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
   async function batchPurchase() {
     const cards = visible.filter((i) => !['uploaded', 'identifying'].includes(i.status));
     if (!cards.length) return;
-    const raw = window.prompt(`Total you paid for these ${cards.length} cards, including shipping and tax ($):`);
+    const raw = await askValue(`Total you paid for these ${cards.length} cards, including shipping and tax ($):`, { title: 'Purchase cost', confirmLabel: 'Split the cost', placeholder: 'e.g. 24.50', inputMode: 'decimal' });
     if (raw == null) return;
     const total = Number(String(raw).replace(/[$,]/g, '').trim());
     if (!Number.isFinite(total) || total < 0) { setMsg({ type: 'error', text: 'Enter a dollar amount, e.g. 24.50' }); return; }
@@ -578,7 +580,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
     if (!res.ok) { setErr(plan.error || `Couldn't start (${res.status})`); return; }
     if (!plan.items?.length) { setErr('No single-card listings with photos to test on. Sync your eBay listings first.'); return; }
     const est = plan.models.map((m) => `${MODEL_LABELS[m]} about ${fee(plan.estimate[m])}`).join(', ');
-    if (!window.confirm(`Run ${plan.items.length} of your listing photos through both models?\n\nEstimated cost: ${est}.\n\nBilled to your Anthropic API key.`)) return;
+    if (!(await askConfirm(`Run ${plan.items.length} of your listing photos through both models?\n\nEstimated cost: ${est}.\n\nBilled to your Anthropic API key.`, { title: 'Model trial', confirmLabel: 'Run the trial' }))) return;
     const id = `t${Date.now()}`;
     setTrialId(id); setRows([]); stop.current = false;
     const jobs = plan.items.flatMap((it) => plan.models.map((m) => ({ model: m, itemId: it.item_id })));
@@ -708,7 +710,7 @@ function AiConnector() {
   }, []);
   useEffect(() => { load(); }, [load]);
   async function revoke(g) {
-    if (!window.confirm(`Disconnect ${g.client?.name || 'this app'}? It loses access to CardDesk right away.`)) return;
+    if (!(await askConfirm(`Disconnect ${g.client?.name || 'this app'}? It loses access to CardDesk right away.`, { title: 'Disconnect app', confirmLabel: 'Disconnect', danger: true }))) return;
     const { error } = await supabase.auth.oauth.revokeGrant({ clientId: g.client.id });
     if (error) setErr(error.message); else load();
   }
