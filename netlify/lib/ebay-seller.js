@@ -17,6 +17,7 @@ export const EBAY_SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
   'https://api.ebay.com/oauth/api_scope/sell.finances',
   'https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.marketing', // Promoted Listings for new listings
 ];
 
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
@@ -80,8 +81,11 @@ export function exchangeCodeForTokens(code) {
   return tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: ruName() });
 }
 
-export function refreshAccessToken(refreshToken) {
-  return tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken, scope: EBAY_SCOPES.join(' ') });
+// A refresh may only ask for permissions the seller already granted, so it uses the ones saved at
+// connect time. New permissions (like promotions) arrive when the seller reconnects.
+export function refreshAccessToken(refreshToken, grantedScopes = null) {
+  const scope = (grantedScopes && String(grantedScopes).trim()) || EBAY_SCOPES.filter((s) => !s.endsWith('sell.marketing')).join(' ');
+  return tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken, scope });
 }
 
 export async function getEbayIdentity(accessToken) {
@@ -116,7 +120,7 @@ export async function getSellerAccessToken(supabaseAdmin, userId) {
 
   let t;
   try {
-    t = await refreshAccessToken(acct.refresh_token);
+    t = await refreshAccessToken(acct.refresh_token, acct.scopes);
   } catch (err) {
     const e = new Error('eBay sign-in expired. Reconnect your eBay account.');
     e.code = 'EBAY_RECONNECT';

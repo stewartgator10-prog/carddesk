@@ -12,6 +12,8 @@ import { tradingCall } from './trading-price.js';
 import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths, LISTABLE_GAMES, GAME_LABELS } from './snap-logic.js';
 import { buildDescription } from './listing-copy.js';
 import { getAppToken } from './ebay-browse.js';
+import { offerThresholds } from './trading-price.js';
+import { promoteListing } from './ebay-promote.js';
 
 export const CCG_CATEGORY = '183454'; // CCG Individual Cards (Pokémon, Magic, ...)
 export const UNGRADED_CONDITION = '4000';
@@ -252,7 +254,8 @@ export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
   const ship = shippingProfileFor(price, templates, settings);
   const ret = templates.policies?.returnProfile;
   const pay = templates.policies?.paymentProfile;
-  const bo = bestOfferPrices(price, tpl.bestOffer);
+  // The seller's rule for new listings (Snap settings): accept offers at 90% and up, decline the rest.
+  const bo = settings.snapBestOffer === false ? null : offerThresholds(price, settings.snapBestOfferPct ?? 10);
   const tplGame = templates?.[item.game] ? item.game : templates?.pokemon ? 'pokemon' : 'mtg';
   const specifics = buildSpecifics(item, tpl, { tplGame, templates });
   return [
@@ -278,7 +281,7 @@ export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
     ret ? `<SellerReturnProfile><ReturnProfileID>${esc(ret.id)}</ReturnProfileID></SellerReturnProfile>` : '',
     pay ? `<SellerPaymentProfile><PaymentProfileID>${esc(pay.id)}</PaymentProfileID></SellerPaymentProfile>` : '',
     '</SellerProfiles>',
-    bo ? '<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>' : '',
+    `<BestOfferDetails><BestOfferEnabled>${bo ? 'true' : 'false'}</BestOfferEnabled></BestOfferDetails>`,
     bo && (bo.decline || bo.accept) ? `<ListingDetails>${bo.decline ? `<MinimumBestOfferPrice currencyID="USD">${money(bo.decline)}</MinimumBestOfferPrice>` : ''}${bo.accept ? `<BestOfferAutoAcceptPrice currencyID="USD">${money(bo.accept)}</BestOfferAutoAcceptPrice>` : ''}</ListingDetails>` : '',
     '</Item>',
   ].join('');
@@ -456,7 +459,7 @@ export async function checkSnapItem({ db, userId, token, item, settings, call = 
   }
 }
 
-export async function publishSnapItem({ db, userId, token, item, settings, call = tradingCall }) {
+export async function publishSnapItem({ db, userId, token, item, settings, call = tradingCall, promoteFetch = fetch }) {
   if (item.status !== 'approved') throw Object.assign(new Error('Only approved cards can be published.'), { status: 409 });
   const check = item.publish_check;
   if (item.publish_state !== 'checked' || !check?.ok) throw Object.assign(new Error('Run the eBay check on this card first.'), { status: 409 });
@@ -494,7 +497,10 @@ export async function publishSnapItem({ db, userId, token, item, settings, call 
   await must(db.from('ebay_listings').upsert({
     account_id: accountId, user_id: userId, item_id: itemId, title: item.title, sku: item.sku, price: Number(item.price), currency: 'USD',
     quantity: 1, quantity_available: 1, quantity_sold: 0, listing_type: 'FixedPriceItem', start_time: now, view_url: url,
-    image_url: (item.ebay_picture_urls || [])[0] || null, status: 'Active', synced_at: now,
+    image_url: (item.ebay_picture_urls || [])[0] || null, status: 'Active', synced_at: now, best_offer: settings?.snapBestOffer !== false,
   }, { onConflict: 'account_id,item_id' }));
-  return { itemId, url, fees };
+  // Promoted Listings at the seller's rate. A problem here never undoes the listing; the card says why.
+  const promo = await promoteListing({ db, userId, token, itemId, settings, fetchImpl: promoteFetch });
+  if (!promo.skipped) await db.from('snap_items').update(promo.ok ? { promoted_at: new Date().toISOString(), promo_error: null } : { promo_error: promo.error }).eq('id', item.id).eq('user_id', userId);
+  return { itemId, url, fees, promoted: promo.ok ? promo.rate : null, promoError: promo.error || null };
 }

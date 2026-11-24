@@ -13,6 +13,15 @@ export async function fetchSellerListings() {
 
 // The Repricer only calls this after the user has seen every change (and its warnings) in the
 // review screen, so large changes are confirmed here. The server refuses them without this flag.
+// Turns Best Offer on (auto-accept at 90% of the price and up, decline below) or off for one listing.
+export async function setListingBestOffer(itemId, enabled) {
+  return readJson(await apiFetch('/api/seller-reprice', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'best_offer', itemId, enabled }),
+  }));
+}
+
 export async function pushPriceChanges(changes) {
   return readJson(await apiFetch('/api/seller-reprice', {
     method: 'POST',

@@ -196,7 +196,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
   const [ebayBusy, setEbayBusy] = useState(null); // { label, done, total }
   async function ebayLoop(label, list, action) {
     setEbayBusy({ label, done: 0, total: list.length }); setMsg(null);
-    let ok = 0; const problems = [];
+    let ok = 0; const problems = []; const promoProblems = [];
     for (const [n, it] of list.entries()) {
       patchLocal(it.id, { publish_state: action === 'check' ? 'checking' : 'publishing' });
       const r = await postJson('/api/snap-publish', { action, id: it.id }).catch((e) => ({ ok: false, data: { error: e.message } }));
@@ -207,7 +207,9 @@ export default function SnapTab({ userId, settings, setSettings }) {
         else problems.push(`${it.title || it.card_name}: ${(r.data.item?.publish_check?.errors || ['eBay check failed'])[0]}`);
       } else if (r.ok) {
         ok += 1;
-        patchLocal(it.id, { status: 'listed', publish_state: 'listed', ebay_item_id: r.data.result.itemId, ebay_url: r.data.result.url });
+        patchLocal(it.id, { status: 'listed', publish_state: 'listed', ebay_item_id: r.data.result.itemId, ebay_url: r.data.result.url,
+          promoted_at: r.data.result.promoted ? new Date().toISOString() : null, promo_error: r.data.result.promoError || null });
+        if (r.data.result.promoError) promoProblems.push(r.data.result.promoError);
       } else {
         problems.push(`${it.title || it.card_name}: ${r.data.error || r.status}`);
         patchLocal(it.id, { publish_state: action === 'check' ? 'check_failed' : 'failed', publish_error: r.data.error });
@@ -217,7 +219,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
     }
     setEbayBusy(null);
     await loadItems();
-    return { ok, problems };
+    return { ok, problems, promoProblems };
   }
 
   async function checkApproved() {
@@ -233,8 +235,8 @@ export default function SnapTab({ userId, settings, setSettings }) {
     const value = list.reduce((t, i) => t + Number(i.price || 0), 0);
     if (!(await askConfirm(`Publish ${list.length} listing${list.length === 1 ? '' : 's'} on eBay now?\n\nTotal list price: $${value.toFixed(2)}\nListing fees from eBay's check: $${fees.toFixed(2)}\n\nThey go live immediately as Buy It Now (Good 'Til Cancelled).`,
       { title: 'Publish to eBay', confirmLabel: `Publish ${list.length} to eBay` }))) return;
-    const { ok, problems } = await ebayLoop('Publishing to eBay', list, 'publish');
-    setMsg(problems.length ? { type: 'error', text: `${ok} listed, ${problems.length} failed: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `${ok} card${ok === 1 ? '' : 's'} listed on eBay and added to inventory with their cost.` });
+    const { ok, problems, promoProblems } = await ebayLoop('Publishing to eBay', list, 'publish');
+    setMsg(problems.length ? { type: 'error', text: `${ok} listed, ${problems.length} failed: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `${ok} card${ok === 1 ? '' : 's'} listed on eBay and added to inventory with their cost.${promoProblems.length ? ` Not promoted: ${[...new Set(promoProblems)][0]}` : ''}` });
   }
 
   // One order's total (cards + shipping + tax) split across the cards on screen by market value.
@@ -415,6 +417,8 @@ function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetr
         <div style={{ fontSize: '0.8rem', padding: 8, border: '1px solid var(--good)' }}>
           <div className="accent-green" style={{ fontWeight: 600 }}>{it.title}</div>
           <div className="ink-dim">{money(it.price)}{it.cost_basis != null ? ` · cost ${money(it.cost_basis)}` : ''} · listed {it.listed_at ? new Date(it.listed_at).toLocaleDateString() : ''}</div>
+          {it.promoted_at && <div className="accent-green" style={{ fontSize: '0.7rem' }}>Promoted Listings: on</div>}
+          {it.promo_error && <div className="accent-amber" style={{ fontSize: '0.7rem' }}>{it.promo_error}</div>}
           {it.ebay_url && <a href={it.ebay_url} target="_blank" rel="noreferrer" className="accent-green" style={{ fontSize: '0.75rem' }}>View on eBay #{it.ebay_item_id} <ExternalLink size={10} /></a>}
         </div>
       )}
@@ -778,7 +782,6 @@ function ListingSetup({ s, set }) {
               {row(`Under $${s.snapShipCutoff}`, strip(p.envelope?.name) || strip(p.parcel?.name))}
               {row(`$${s.snapShipCutoff} and up`, strip(p.parcel?.name) || strip(p.envelope?.name))}
               {row('Returns', strip(p.returnProfile?.name))}
-              {row('Best Offer', tpl?.bestOffer?.enabled ? `on${tpl.bestOffer.declinePct ? `, auto-decline below ${tpl.bestOffer.declinePct}% of price` : ''}${tpl.bestOffer.acceptPct ? `, auto-accept at ${tpl.bestOffer.acceptPct}%` : ''}` : 'off')}
             </div>
           ) : <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Not learned yet. Publishing needs this once.</div>}
           <button className="btn-ghost" disabled={busy} onClick={learn} style={{ padding: '8px 12px', justifySelf: 'start', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
@@ -787,6 +790,17 @@ function ListingSetup({ s, set }) {
           {err && <div className="accent-red" style={{ fontSize: '0.75rem' }}>{err}</div>}
         </>
       )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 10, alignItems: 'end' }}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', margin: 0, fontSize: '0.8rem', textTransform: 'none', letterSpacing: 0, color: 'var(--ink)' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={s.snapBestOffer !== false} onChange={(e) => set('snapBestOffer', e.target.checked)} /> Best Offer on new listings
+        </label>
+        <div><label htmlFor="bo-pct">Accept offers within %</label><input id="bo-pct" className="bg-input" type="number" step="1" min="1" max="50" disabled={s.snapBestOffer === false} value={s.snapBestOfferPct ?? 10} onChange={(e) => set('snapBestOfferPct', e.target.value === '' ? 10 : Number(e.target.value))} /></div>
+        <div><label htmlFor="promo-pct">Promoted Listings ad rate %</label><input id="promo-pct" className="bg-input" type="number" step="0.1" min="0" max="20" value={s.snapPromotePct ?? 2} onChange={(e) => set('snapPromotePct', e.target.value === '' ? 0 : Number(e.target.value))} /></div>
+        <div className="ink-faint" style={{ gridColumn: '1 / -1', fontSize: '0.7rem' }}>
+          Best Offer: offers at {100 - (Number(s.snapBestOfferPct) || 10)}% of the price or more are accepted automatically, lower ones declined (a $10.00 card accepts $9.00 and up). Turn it off per listing in the Repricer.
+          {' '}Promotion: each new listing joins your CardDesk Promoted Listings campaign; eBay charges the ad rate only when a promoted listing sells. 0 turns it off. The first time, reconnect eBay (eBay Listings tab) to allow promotions.
+        </div>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
         <div><label htmlFor="ship-cutoff">Parcel from $</label><input id="ship-cutoff" className="bg-input" type="number" step="1" min="0" value={s.snapShipCutoff} onChange={(e) => set('snapShipCutoff', e.target.value === '' ? 20 : Number(e.target.value))} /></div>
         <div className="ink-faint" style={{ fontSize: '0.7rem', alignSelf: 'end' }}>Cards priced under this use your envelope shipping policy; at or above it, your parcel policy.</div>

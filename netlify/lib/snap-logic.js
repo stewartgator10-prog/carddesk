@@ -10,6 +10,11 @@ export const SNAP_DEFAULTS = {
   aiMonthlyBudget: 25,    // USD of estimated Claude spend per calendar month; 0 = no limit
   snapShipCutoff: 20,     // list price under this uses the envelope shipping policy, at or over it the parcel one
   // The package every card ships in. Calculated shipping policies need its weight and size.
+  // New listings: Best Offer on, auto-accepting offers within this % of the price and declining the
+  // rest; and Promoted Listings at this ad rate (0 = off).
+  snapBestOffer: true,
+  snapBestOfferPct: 10,
+  snapPromotePct: 2,
   snapPackageWeightOz: 3,
   snapPackageLengthIn: 9,
   snapPackageWidthIn: 6,
