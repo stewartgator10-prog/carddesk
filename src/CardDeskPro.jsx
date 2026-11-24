@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
-import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera, Receipt, HandCoins, Settings } from 'lucide-react';
+import React, { useState, useEffect, useMemo, Suspense, lazy, useCallback } from 'react';
+import { Search, Plus, Trash2, ExternalLink, Target, Package, BarChart3, Eye, X, Flame, Download, Upload, Link2, Loader, Zap, LogOut, Store, Tag, DollarSign, Camera, Receipt, HandCoins, Settings, Gem, Bell } from 'lucide-react';
 import { Hedge, Clouds, useLivingTouches } from './Scenery.jsx';
 import EbaySalesTab from './EbaySalesTab.jsx';
 import ListingsTab from './ListingsTab.jsx';
@@ -12,6 +12,7 @@ import RepricerTab from './pricing/RepricerTab.jsx';
 const SECTIONS = [
   { id: 'snap', label: 'Snap to List', Icon: Camera, views: [{ id: 'snap', label: 'Snap to List' }] },
   { id: 'offers', label: 'Buy Offers', Icon: HandCoins, views: [{ id: 'offers', label: 'Buy Offers' }] },
+  { id: 'collection', label: 'Collection', Icon: Gem, views: [{ id: 'collection', label: 'Collection' }] },
   { id: 'deals', label: 'Find Deals', Icon: Target, views: [
     { id: 'analyzer', label: 'Deal Analyzer', Icon: Target }, { id: 'livesearch', label: 'Live eBay Search', Icon: Zap },
     { id: 'scanner', label: 'Bulk Scanner', Icon: Search }, { id: 'watchlist', label: 'Watchlist', Icon: Eye },
@@ -26,6 +27,7 @@ const sectionOf = (view) => SECTIONS.find((s) => s.views.some((v) => v.id === vi
 const SnapTab = lazy(() => import('./SnapTab.jsx'));
 const CostsTab = lazy(() => import('./CostsTab.jsx'));
 const BuyOffersTab = lazy(() => import('./BuyOffersTab.jsx'));
+const CollectionTab = lazy(() => import('./CollectionTab.jsx'));
 import { SNAP_DEFAULTS } from '../netlify/lib/snap-logic.js';
 import { OFFER_DEFAULTS } from '../netlify/lib/offer-logic.js';
 import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
@@ -78,6 +80,13 @@ function computeMedian(arr) {
 
 export default function CardDeskPro({ session }) {
   const userId = session.user.id;
+  // Collection cards that hit a target or growth %: a badge on the tab and a notice on every page.
+  const [collectionAlerts, setCollectionAlerts] = useState(0);
+  const loadCollectionAlerts = useCallback(async () => {
+    const { count } = await supabase.from('collection_items').select('id', { count: 'exact', head: true }).eq('status', 'held').eq('alert_state', 'active');
+    setCollectionAlerts(count || 0);
+  }, []);
+  useEffect(() => { loadCollectionAlerts(); }, [loadCollectionAlerts]);
   useLivingTouches();
   const [tab, setTab] = useState(() => {
     const asked = new URLSearchParams(window.location.search).get('tab');
@@ -426,6 +435,13 @@ export default function CardDeskPro({ session }) {
         <Hedge number={SECTIONS.indexOf(section) + 1} />
       </div>
 
+      {collectionAlerts > 0 && tab !== 'collection' && (
+        <div className="app-pad" role="status" style={{ padding: '10px 32px', background: 'var(--warn-wash)', borderBottom: '1px solid var(--line)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.85rem' }}>
+          <Bell size={15} className="accent-amber" />
+          <span>{collectionAlerts} collection card{collectionAlerts === 1 ? ' is' : 's are'} ready to review for listing.</span>
+          <button className="btn-ghost" onClick={() => setTab('collection')} style={{ padding: '4px 10px', fontSize: '0.78rem' }}>Review</button>
+        </div>
+      )}
       {legacyLocal && (
         <div className="app-pad" style={{ padding: '12px 32px', background: 'var(--warn-wash)', borderBottom: '1px solid var(--warn)', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.8rem' }}>
           <span className="accent-amber">This browser still has {legacyLocal.total} items from the old CardDesk (before accounts). Copy them into your account?</span>
@@ -445,6 +461,7 @@ export default function CardDeskPro({ session }) {
           <button key={s.id} className={`tab-btn ${section.id === s.id ? 'active' : ''}`} aria-current={section.id === s.id ? 'page' : undefined}
             onClick={() => setTab(lastView[s.id] || s.views[0].id)}>
             <span className="hex"><s.Icon size={13} strokeWidth={2.4} /></span>{s.label}
+            {s.id === 'collection' && collectionAlerts > 0 && <span className="tab-badge" aria-label={`${collectionAlerts} ready to review`}>{collectionAlerts}</span>}
           </button>
         ))}
       </nav>
@@ -785,6 +802,11 @@ export default function CardDeskPro({ session }) {
           </div>
         )}
         {tab === 'ebaysales' && <EbaySalesTab />}
+        {tab === 'collection' && (
+          <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
+            <CollectionTab userId={userId} settings={settings} setSettings={setSettings} onGoToSnap={() => setTab('snap')} onAlertsChanged={loadCollectionAlerts} />
+          </Suspense>
+        )}
         {tab === 'offers' && (
           <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
             <BuyOffersTab userId={userId} settings={settings} setSettings={setSettings} onGoToSnap={() => setTab('snap')} />

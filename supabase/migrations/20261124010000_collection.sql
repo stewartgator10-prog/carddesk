@@ -65,9 +65,7 @@ create index if not exists collection_prices_user on public.collection_prices (u
 
 alter table public.collection_items enable row level security;
 alter table public.collection_prices enable row level security;
-drop policy if exists "collection items: owner" on public.collection_items;
 create policy "collection items: owner" on public.collection_items for all
   using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
-drop policy if exists "collection prices: owner reads" on public.collection_prices;
 create policy "collection prices: owner reads" on public.collection_prices for select
   using ((select auth.uid()) = user_id);
