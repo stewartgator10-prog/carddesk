@@ -7,20 +7,22 @@ import { supabase, apiFetch } from './lib/supabase.js';
 import { useCollection, useSettings, importBackup, newId, readLegacyLocalData, markLegacyLocalDataHandled } from './lib/store.js';
 import RepricerTab from './pricing/RepricerTab.jsx';
 // Loaded only when the tab is opened, so phones don't download it up front.
-const TABS = [
-  { id: 'analyzer', label: 'Deal Analyzer', Icon: Target },
-  { id: 'snap', label: 'Snap to List', Icon: Camera },
-  { id: 'offers', label: 'Buy Offers', Icon: HandCoins },
-  { id: 'livesearch', label: 'Live eBay Search', Icon: Zap },
-  { id: 'scanner', label: 'Bulk Scanner', Icon: Search },
-  { id: 'watchlist', label: 'Watchlist', Icon: Eye },
-  { id: 'comps', label: 'Sold Comps', Icon: BarChart3 },
-  { id: 'inventory', label: 'Inventory · P&L', Icon: Package },
-  { id: 'costs', label: 'Costs', Icon: Receipt },
-  { id: 'listings', label: 'eBay Listings', Icon: Store },
-  { id: 'repricer', label: 'Repricer', Icon: Tag },
-  { id: 'ebaysales', label: 'eBay Sales · Real P&L', Icon: DollarSign },
+// Six sections, each holding one or more views. A view keeps its own id, so links such as
+// ?tab=listings (the eBay connect redirect) and ?tab=snap still open the right place.
+const SECTIONS = [
+  { id: 'snap', label: 'Snap to List', Icon: Camera, views: [{ id: 'snap', label: 'Snap to List' }] },
+  { id: 'offers', label: 'Buy Offers', Icon: HandCoins, views: [{ id: 'offers', label: 'Buy Offers' }] },
+  { id: 'deals', label: 'Find Deals', Icon: Target, views: [
+    { id: 'analyzer', label: 'Deal Analyzer', Icon: Target }, { id: 'livesearch', label: 'Live eBay Search', Icon: Zap },
+    { id: 'scanner', label: 'Bulk Scanner', Icon: Search }, { id: 'watchlist', label: 'Watchlist', Icon: Eye },
+    { id: 'comps', label: 'Sold Comps', Icon: BarChart3 }] },
+  { id: 'prices', label: 'Listings & Prices', Icon: Tag, views: [
+    { id: 'repricer', label: 'Repricer', Icon: Tag }, { id: 'listings', label: 'eBay account', Icon: Store }] },
+  { id: 'stock', label: 'Inventory', Icon: Package, views: [
+    { id: 'inventory', label: 'Stock & P&L', Icon: Package }, { id: 'costs', label: 'Costs', Icon: Receipt }] },
+  { id: 'sales', label: 'Sales & Profit', Icon: DollarSign, views: [{ id: 'ebaysales', label: 'eBay Sales · Real P&L' }] },
 ];
+const sectionOf = (view) => SECTIONS.find((s) => s.views.some((v) => v.id === view)) || SECTIONS[0];
 const SnapTab = lazy(() => import('./SnapTab.jsx'));
 const CostsTab = lazy(() => import('./CostsTab.jsx'));
 const BuyOffersTab = lazy(() => import('./BuyOffersTab.jsx'));
@@ -77,7 +79,14 @@ function computeMedian(arr) {
 export default function CardDeskPro({ session }) {
   const userId = session.user.id;
   useLivingTouches();
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'analyzer');
+  const [tab, setTab] = useState(() => {
+    const asked = new URLSearchParams(window.location.search).get('tab');
+    return SECTIONS.some((s) => s.views.some((v) => v.id === asked)) ? asked : 'snap';
+  });
+  // The view last open in each section, so switching sections and back returns to it.
+  const [lastView, setLastView] = useState({});
+  useEffect(() => { setLastView((m) => ({ ...m, [sectionOf(tab).id]: tab })); }, [tab]);
+  const section = sectionOf(tab);
   const [dataError, setDataError] = useState(null);
   const { settings, setSettings, loaded: settingsLoaded } = useSettings(userId, DEFAULT_SETTINGS, setDataError);
   const { items: watchlist, setItems: setWatchlist, loaded: watchLoaded, reload: reloadWatchlist } = useCollection('watchlist', userId, setDataError);
@@ -414,7 +423,7 @@ export default function CardDeskPro({ session }) {
             <button className="btn-ghost" onClick={() => supabase.auth.signOut()} title={`Signed in as ${session.user.email}`} style={{ padding: '8px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><LogOut size={14} /> Sign out</button>
           </div>
         </header>
-        <Hedge number={Math.max(1, TABS.findIndex((t) => t.id === tab) + 1)} />
+        <Hedge number={SECTIONS.indexOf(section) + 1} />
       </div>
 
       {legacyLocal && (
@@ -432,12 +441,22 @@ export default function CardDeskPro({ session }) {
       )}
 
       <nav className="trail app-pad" style={{ paddingLeft: 32, paddingRight: 32 }} aria-label="Sections">
-        {TABS.map(({ id, label, Icon }) => (
-          <button key={id} className={`tab-btn ${tab === id ? 'active' : ''}`} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
-            <span className="hex"><Icon size={13} strokeWidth={2.4} /></span>{label}
+        {SECTIONS.map((s) => (
+          <button key={s.id} className={`tab-btn ${section.id === s.id ? 'active' : ''}`} aria-current={section.id === s.id ? 'page' : undefined}
+            onClick={() => setTab(lastView[s.id] || s.views[0].id)}>
+            <span className="hex"><s.Icon size={13} strokeWidth={2.4} /></span>{s.label}
           </button>
         ))}
       </nav>
+      {section.views.length > 1 && (
+        <nav className="subtrail app-pad" style={{ paddingLeft: 32, paddingRight: 32 }} aria-label={`${section.label} views`}>
+          {section.views.map((v) => (
+            <button key={v.id} className={`subtab ${tab === v.id ? 'active' : ''}`} aria-current={tab === v.id ? 'page' : undefined} onClick={() => setTab(v.id)}>
+              {v.Icon && <v.Icon size={13} />}{v.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
       <main className="app-pad" style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
 
@@ -732,7 +751,7 @@ export default function CardDeskPro({ session }) {
             </div>
             <div className="bg-card" style={{ padding: 0 }}>
               <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--line)' }}><h2 className="display-font" style={{ fontSize: '1.3rem', margin: 0 }}>INVENTORY · {inventory.length} ITEMS</h2></div>
-              {inventory.length === 0 ? <div style={{ padding: 48, textAlign: 'center' }} className="ink-faint">Inventory empty. Add items from Analyzer.</div> : (
+              {inventory.length === 0 ? <div style={{ padding: 48, textAlign: 'center' }} className="ink-faint">Inventory empty. Add items from Find Deals → Deal Analyzer.</div> : (
                 <div className="scrollable">
                   <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 80px 90px 90px 90px 100px 110px 40px', gap: 8, padding: '12px 24px', fontSize: '0.7rem', letterSpacing: '0.1em', color: 'var(--ink-dim)', textTransform: 'uppercase', borderBottom: '1px solid var(--line-soft)' }}>
                     <div>Card · Set</div><div>Cond.</div><div>Status</div><div style={{ textAlign: 'right' }}>Cost</div><div style={{ textAlign: 'right' }}>FMV/Sale</div><div style={{ textAlign: 'right' }}>P&L</div><div>Acquired</div><div></div><div></div>

@@ -206,7 +206,7 @@ export default function CostsTab({ settings }) {
             <button className="btn-ghost" disabled={!!busy || !sales.some((s) => s.cost_basis == null)} onClick={() => run('estsales', { action: 'estimate_sales', pct: Number(pct) }, (r) => `Estimated ${r.estimated} past sales at ${pct}% of the sale price.`)}
               style={{ padding: '6px 10px', display: 'inline-flex', gap: 4, alignItems: 'center' }}>{busy === 'estsales' ? <Loader size={13} className="spin" /> : <Calculator size={13} />} Fill</button>
           </div>
-          {sales.length === 0 ? <div className="ink-faint" style={{ padding: 40, textAlign: 'center' }}>No eBay sales synced yet. Sync them on the eBay Sales tab.</div> : (
+          {sales.length === 0 ? <div className="ink-faint" style={{ padding: 40, textAlign: 'center' }}>No eBay sales synced yet. Sync them in Sales & Profit.</div> : (
             <div className="scrollable">
               <div className="grid-row" style={{ gridTemplateColumns: 'minmax(0, 1fr) 54px 54px 80px 54px', gap: 6, padding: '8px 10px', fontSize: '0.65rem', letterSpacing: '0.08em', color: 'var(--ink-dim)' }}>
                 <div>SALE</div><div style={{ textAlign: 'right' }}>SOLD</div><div style={{ textAlign: 'right' }}>NET</div><div>COST</div><div style={{ textAlign: 'right' }}>PROFIT</div>
