@@ -183,8 +183,27 @@ export function buildServer(ctx) {
   return server;
 }
 
+const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+export function infoPage(origin) {
+  const url = esc(`${origin}/mcp`);
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CardDesk connector</title>
+<style>body{font-family:system-ui,sans-serif;background:#f1f5e2;color:#23372c;margin:0;padding:24px;line-height:1.5}main{max-width:560px;margin:0 auto;background:#fffdf5;border:2px solid #c9d0d6;border-radius:16px;padding:22px}code{background:#ecead6;padding:2px 6px;border-radius:6px;word-break:break-all}h1{margin:0 0 8px;font-size:1.4rem}li{margin-bottom:6px}</style></head>
+<body><main><h1>CardDesk AI connector</h1>
+<p>This address is for AI apps (Claude, Muse, Grok), not for a browser. Seeing this page means it's working.</p>
+<p>Connector address: <code>${url}</code></p>
+<ol><li>In CardDesk, open <b>Snap to List → Settings → AI app connector</b> and create an access key.</li>
+<li>In your AI app, add a custom connector (MCP server) with this address.</li>
+<li>Paste the key where the app asks for an API key or token. It's sent as <code>Authorization: Bearer &lt;key&gt;</code> or as an <code>X-API-Key</code> header.</li></ol>
+<p><a href="${esc(origin)}/">Back to CardDesk</a></p></main></body></html>`;
+}
+
 export async function handleMcp(req, { authenticate = defaultAuthenticate, db = null, deps = {} } = {}) {
   const origin = new URL(req.url).origin;
+  // A person opening the address in a browser gets a short explanation instead of "Method not allowed".
+  // AI apps asking for an event stream (GET with Accept: text/event-stream) still get the standard 405.
+  if (req.method === 'GET' && /text\/html/i.test(req.headers.get('accept') || '')) {
+    return new Response(infoPage(origin), { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+  }
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { Allow: 'POST' } });
   const admin = db || getSupabaseAdmin();
   const auth = await authenticate(req, origin, admin);
