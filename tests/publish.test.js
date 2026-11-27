@@ -275,7 +275,7 @@ test('a listing can carry several photos: main first, extras in order, capped, a
 
   const many = Array.from({ length: MAX_LISTING_PHOTOS }, (_, i) => `u1/b/m${i}.jpg`);
   const tooMany = publishDb(card({ back_photo_path: null, extra_photo_paths: many }));
-  await assert.rejects(checkSnapItem({ db: tooMany, userId: U, token: 't', item: tooMany.tables.snap_items[0], settings: {}, fetchImpl, call: async () => verifyOk }), /up to 12 photos/);
+  await assert.rejects(checkSnapItem({ db: tooMany, userId: U, token: 't', item: tooMany.tables.snap_items[0], settings: {}, fetchImpl, call: async () => verifyOk }), new RegExp(`up to ${MAX_LISTING_PHOTOS} photos`));
   const foreign = publishDb(card({ back_photo_path: null, extra_photo_paths: ['someone-else/b/x.jpg'] }));
   await assert.rejects(checkSnapItem({ db: foreign, userId: U, token: 't', item: foreign.tables.snap_items[0], settings: {}, fetchImpl, call: async () => verifyOk }), /does not belong to you/);
   assert.equal(uploaded.length, 4);

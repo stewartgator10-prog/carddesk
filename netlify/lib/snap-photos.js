@@ -8,9 +8,9 @@
 import crypto from 'node:crypto';
 import { cropCardPhoto, validCorners } from './photo-crop.js';
 import { readCorners } from './card-vision.js';
-import { listingPhotoPaths, MAX_LISTING_PHOTOS } from './snap-logic.js';
+import { listingPhotoPaths, MAX_LISTING_PHOTOS, liveChanges } from './snap-logic.js';
 import { usageRow, logUsage, checkBudget } from './ai-usage.js';
-import { uploadListingPhotos, responseOf, wrap } from './ebay-listing.js';
+import { uploadListingPhotos, responseOf, wrap, descriptionHtml } from './ebay-listing.js';
 import { tradingCall } from './trading-price.js';
 
 const BUCKET = 'snap-photos';
@@ -134,24 +134,47 @@ export async function autoCropOnSnap({ db, userId, item, read, settings }) {
   }
 }
 
-// A card already live on eBay: send its current photos and replace the listing's pictures.
-export function buildPictureReviseXml(itemId, urls) {
-  return wrap('ReviseFixedPriceItem', `<Item><ItemID>${esc(itemId)}</ItemID><PictureDetails>${urls.map((u) => `<PictureURL>${esc(u)}</PictureURL>`).join('')}</PictureDetails></Item>`);
+// A card already live on eBay: send what changed (photos, title, description) in one revision.
+const cdata = (v) => `<![CDATA[${String(v ?? '').replace(/]]>/g, ']]]]><![CDATA[>')}]]>`;
+export function buildReviseXml(itemId, { urls = null, title = null, descriptionHtml: desc = null } = {}) {
+  const parts = [
+    title != null ? `<Title>${esc(title)}</Title>` : '',
+    desc != null ? `<Description>${cdata(desc)}</Description>` : '',
+    urls ? `<PictureDetails>${urls.map((u) => `<PictureURL>${esc(u)}</PictureURL>`).join('')}</PictureDetails>` : '',
+  ].join('');
+  return wrap('ReviseFixedPriceItem', `<Item><ItemID>${esc(itemId)}</ItemID>${parts}</Item>`);
 }
+export const buildPictureReviseXml = (itemId, urls) => buildReviseXml(itemId, { urls });
 
-export async function pushPhotosToEbay({ db, userId, token, item, call = tradingCall, fetchImpl = fetch }) {
+export async function pushChangesToEbay({ db, userId, token, item, call = tradingCall, fetchImpl = fetch }) {
   if (item.status !== 'listed' || !item.ebay_item_id) throw fail('This card is not live on eBay. Its photos go up when you check and publish it.', 409);
-  const paths = listingPhotoPaths(item);
-  if (paths.some((p) => !String(p).startsWith(`${userId}/`))) throw fail('One of the photos does not belong to you.', 403);
-  const urls = await uploadListingPhotos({ db, token, item, paths, fetchImpl });
-  const xml = await call(token, 'ReviseFixedPriceItem', buildPictureReviseXml(item.ebay_item_id, urls));
+  const changes = liveChanges(item);
+  if (!changes.length) throw fail('Nothing to update: eBay already shows this card\'s photos, title and description.', 409);
+  const title = String(item.title || '').trim();
+  if (changes.includes('title') && (!title || title.length > 80)) throw fail('The title must be 1 to 80 characters.', 400);
+  let urls = null;
+  if (changes.includes('photos')) {
+    const paths = listingPhotoPaths(item);
+    if (paths.some((p) => !String(p).startsWith(`${userId}/`))) throw fail('One of the photos does not belong to you.', 403);
+    urls = await uploadListingPhotos({ db, token, item, paths, fetchImpl });
+  }
+  const xml = await call(token, 'ReviseFixedPriceItem', buildReviseXml(item.ebay_item_id, {
+    urls,
+    title: changes.includes('title') ? title : null,
+    descriptionHtml: changes.includes('description') ? descriptionHtml(item) : null,
+  }));
   const { errors } = responseOf(xml, 'ReviseFixedPriceItem');
-  if (errors.length) throw fail(`eBay didn't take the new photos: ${errors.join('; ')}`, 502);
-  const patch = { ebay_picture_urls: urls };
+  if (errors.length) throw fail(`eBay didn't take the changes: ${errors.join('; ')}`, 502);
+  const patch = { ebay_live: { title: item.title ?? null, description: item.description ?? null } };
+  if (urls) patch.ebay_picture_urls = urls;
   await must(db.from('snap_items').update(patch).eq('id', item.id).eq('user_id', userId));
-  await db.from('ebay_listings').update({ image_url: urls[0] }).eq('user_id', userId).eq('item_id', String(item.ebay_item_id));
-  return { ...item, ...patch };
+  const listing = {};
+  if (urls) listing.image_url = urls[0];
+  if (changes.includes('title')) listing.title = title;
+  if (Object.keys(listing).length) await db.from('ebay_listings').update(listing).eq('user_id', userId).eq('item_id', String(item.ebay_item_id));
+  return { ...item, ...patch, updated: changes };
 }
+export const pushPhotosToEbay = pushChangesToEbay;
 
 // Photos on a live card that eBay doesn't have yet.
 export const photosOutOfDate = (item) => item?.status === 'listed' && !(item.ebay_picture_urls || []).length;

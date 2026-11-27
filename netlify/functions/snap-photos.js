@@ -4,12 +4,12 @@
 //   { action: 'crop', id, path, corners }     straighten + crop with corners placed by hand
 //   { action: 'undo', id, path }              put the original photo back
 //   { action: 'order', id, paths }            new order (first = main photo); photos left out are removed
-//   { action: 'update_ebay', id }             a live listing: replace its pictures on eBay with the current photos
+//   { action: 'update_ebay', id }             a live listing: send its changed photos, title and description to eBay
 // Returns { item }.
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, getSellerAccessToken, json } from '../lib/ebay-seller.js';
 import { loadSnapSettings } from '../lib/snap-identify.js';
-import { applyCrop, undoEdit, setPhotoOrder, autoCrop, pushPhotosToEbay } from '../lib/snap-photos.js';
+import { applyCrop, undoEdit, setPhotoOrder, autoCrop, pushChangesToEbay } from '../lib/snap-photos.js';
 
 export default async (req) => {
   if (req.method !== 'POST') return json(405, { error: 'Use POST.' });
@@ -31,7 +31,7 @@ export default async (req) => {
       case 'crop': return json(200, { item: await applyCrop({ db, userId, item, path, corners: body.corners, by: 'manual' }) });
       case 'undo': return json(200, { item: await undoEdit({ db, userId, item, path }) });
       case 'order': return json(200, { item: await setPhotoOrder({ db, userId, item, paths: body.paths }) });
-      case 'update_ebay': return json(200, { item: await pushPhotosToEbay({ db, userId, token: await getSellerAccessToken(db, userId), item }) });
+      case 'update_ebay': return json(200, { item: await pushChangesToEbay({ db, userId, token: await getSellerAccessToken(db, userId), item }) });
       default: return json(400, { error: 'Unknown action.' });
     }
   } catch (err) {

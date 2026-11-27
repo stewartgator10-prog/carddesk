@@ -3,7 +3,7 @@ import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, Flask
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import CropImg from './lib/CropImg.jsx';
-import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS } from '../netlify/lib/snap-logic.js';
+import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS, liveChanges } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
 import { askConfirm, askValue } from './lib/dialog.jsx';
@@ -57,7 +57,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
   const budgetHit = useRef(false);
 
   const loadItems = useCallback(async () => {
-    const { data, error } = await supabase.from('snap_items').select('*').in('status', OPEN).order('created_at', { ascending: false }).limit(300);
+    const { data, error } = await supabase.from('snap_items').select('*').in('status', OPEN).order('created_at', { ascending: false }).limit(1500);
     if (error) { setMsg({ type: 'error', text: `Couldn't load the queue: ${error.message}` }); return; }
     setItems(data || []);
   }, []);
@@ -73,14 +73,6 @@ export default function SnapTab({ userId, settings, setSettings }) {
 
   useEffect(() => { loadItems(); loadUsage(); }, [loadItems, loadUsage]);
 
-  // Signed links for this user's private photos (valid for an hour).
-  useEffect(() => {
-    const need = [...new Set(items.flatMap(listingPhotoPaths))].filter((p) => !photoUrls[p]);
-    if (!need.length) return;
-    supabase.storage.from('snap-photos').createSignedUrls(need, 3600).then(({ data }) => {
-      if (data) setPhotoUrls((u) => ({ ...u, ...Object.fromEntries(data.filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl])) }));
-    });
-  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const patchLocal = (id, patch) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
 
@@ -214,12 +206,19 @@ export default function SnapTab({ userId, settings, setSettings }) {
     onUndo: (path) => photoCall(it, { action: 'undo', path }, 'Undoing…'),
     onEdit: (path) => setEditing({ id: it.id, path }),
   });
-  async function sendPhotosToEbay(item) {
+  async function sendChangesToEbay(item) {
+    const ch = liveChanges(item);
+    if (!ch.length) return;
     const n = listingPhotoPaths(item).length;
-    if (!(await askConfirm(`Replace the photos on your live eBay listing #${item.ebay_item_id} with these ${n} photo${n === 1 ? '' : 's'}?\n\nBuyers see the new photos right away. Price, title and everything else stay the same.`,
-      { title: 'Update photos on eBay', confirmLabel: 'Update photos on eBay' }))) return;
+    const lines = [
+      ch.includes('photos') && `Photos: replaced with these ${n} photo${n === 1 ? '' : 's'}.`,
+      ch.includes('title') && `Title: "${item.title}"`,
+      ch.includes('description') && `Description: replaced with the text on this card.${item.imported_from_ebay_at ? ' The old listing\'s layout and styling are not kept.' : ''}`,
+    ].filter(Boolean);
+    if (!(await askConfirm(`Update your live eBay listing #${item.ebay_item_id}?\n\n${lines.join('\n')}\n\nBuyers see the changes right away. Price and everything else stay the same.`,
+      { title: 'Update on eBay', confirmLabel: 'Update on eBay' }))) return;
     const done = await photoCall(item, { action: 'update_ebay' }, 'Sending to eBay…');
-    if (done) setMsg({ type: 'ok', text: `Photos updated on eBay listing #${item.ebay_item_id}.` });
+    if (done) setMsg({ type: 'ok', text: `eBay listing #${item.ebay_item_id} updated: ${ch.join(', ')}.` });
   }
 
   // Cards from a buy-offer binder page start with only part of the page photo; this swaps in a real one.
@@ -305,7 +304,24 @@ export default function SnapTab({ userId, settings, setSettings }) {
   }
 
   const counts = useMemo(() => Object.fromEntries(OPEN.map((st) => [st, items.filter((i) => i.status === st).length])), [items]);
-  const visible = items.filter((i) => (filter === 'open' ? !DONE.includes(i.status) : i.status === filter));
+  const [search, setSearch] = useState('');
+  const [pageSize, setPageSize] = useState(24);
+  useEffect(() => { setPageSize(24); }, [filter, search]);
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const matching = items.filter((i) => (filter === 'open' ? !DONE.includes(i.status) : filter === 'changed' ? liveChanges(i).length > 0 : i.status === filter)
+    && words.every((w) => `${i.title || ''} ${i.card_name || ''} ${i.ebay_item_id || ''} ${i.sku || ''}`.toLowerCase().includes(w)));
+  const visible = matching.slice(0, pageSize);
+  const changedCount = useMemo(() => items.filter((i) => liveChanges(i).length > 0).length, [items]);
+
+  // Signed links for the photos of the cards on screen (valid for an hour).
+  const visibleKey = visible.map((i) => listingPhotoPaths(i).join(',')).join('|');
+  useEffect(() => {
+    const need = [...new Set(visible.flatMap(listingPhotoPaths))].filter((p) => !photoUrls[p]);
+    if (!need.length) return;
+    supabase.storage.from('snap-photos').createSignedUrls(need, 3600).then(({ data }) => {
+      if (data) setPhotoUrls((u) => ({ ...u, ...Object.fromEntries(data.filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl])) }));
+    });
+  }, [visibleKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const toCheck = items.filter((i) => i.status === 'approved' && i.publish_state !== 'checked').length;
   const toPublish = items.filter((i) => i.status === 'approved' && i.publish_state === 'checked' && i.publish_check?.ok).length;
   const monthSpend = usage.month.reduce((t, r) => t + Number(r.cost_usd || 0), 0);
@@ -346,7 +362,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
       {panel === 'queue' && (
         <>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`]].map(([k, l]) => (
+            {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`], ...(changedCount ? [['changed', `Not on eBay yet (${changedCount})`]] : [])].map(([k, l]) => (
               <button key={k} className="btn-ghost" onClick={() => setFilter(k)} style={{ padding: '6px 10px', fontSize: '0.7rem', borderColor: filter === k ? 'var(--active)' : undefined, color: filter === k ? 'var(--active)' : undefined }}>{l}</button>
             ))}
             <span style={{ flex: 1 }} />
@@ -359,14 +375,21 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </>}
           </div>
           {ebayBusy && <div className="accent-amber" style={{ fontSize: '0.8rem' }}><Loader size={12} className="spin" /> {ebayBusy.label}: {ebayBusy.done} of {ebayBusy.total}…</div>}
+          {(filter === 'listed' || filter === 'changed') && <ImportPanel onDone={loadItems} />}
+          {(filter === 'listed' || filter === 'changed' || items.length > 40) && (
+            <input className="bg-input" type="search" aria-label="Search cards" placeholder="Search title, item number or SKU" value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '8px 12px', fontSize: '0.85rem' }} />
+          )}
           {visible.length === 0 ? (
             <div className="bg-card ink-faint" style={{ padding: 48, textAlign: 'center' }}>
-              {items.length ? 'Nothing here.' : 'No cards yet. Tap "snap cards" to photograph a stack.'}
+              {words.length ? 'No cards match that search.' : items.length ? 'Nothing here.' : 'No cards yet. Tap "snap cards" to photograph a stack.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} photoUrls={photoUrls} photoBusy={photoBusy[it.id]} photo_={photoHandlers(it)} onSendPhotos={() => sendPhotosToEbay(it)} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onReplace={(f) => replacePhoto(it, f)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} photoUrls={photoUrls} photoBusy={photoBusy[it.id]} photo_={photoHandlers(it)} onSendPhotos={() => sendChangesToEbay(it)} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onReplace={(f) => replacePhoto(it, f)} />)}
             </div>
+          )}
+          {matching.length > visible.length && (
+            <button className="btn-ghost" onClick={() => setPageSize((n) => n + 48)} style={{ padding: '10px 14px', justifySelf: 'center' }}>Show more ({matching.length - visible.length} left)</button>
           )}
           <div className="ink-faint" style={{ fontSize: '0.7rem' }}>
             Approved cards: "check" uploads the photos and runs eBay's free listing check (nothing goes live). "publish" lists the cards that passed, using your learned listing setup (Snap settings).
@@ -414,7 +437,7 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
         <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', minWidth: 0, overflow: 'hidden' }}>
           {it.catalog_image_url
             ? <img src={it.catalog_image_url} alt="Catalog match" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-            : <span className="ink-faint" style={{ fontSize: '0.7rem', textAlign: 'center', padding: 8 }}>{busy ? '' : it.catalog_source ? <>Matched in the catalog, no picture:<br />{[it.catalog_set, it.catalog_number, it.rarity].filter(Boolean).join(' · ')}</> : 'No catalog match'}</span>}
+            : <span className="ink-faint" style={{ fontSize: '0.7rem', textAlign: 'center', padding: 8 }}>{busy ? '' : it.catalog_source ? <>Matched in the catalog, no picture:<br />{[it.catalog_set, it.catalog_number, it.rarity].filter(Boolean).join(' · ')}</> : it.imported_from_ebay_at ? 'From your eBay listing' : 'No catalog match'}</span>}
           {it.catalog_source && <span style={{ position: 'absolute', bottom: 2, right: 4, fontSize: '0.6rem' }} className="ink-faint">{it.catalog_source}</span>}
         </div>
       </div>
@@ -428,10 +451,10 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
       {!busy && (
         <PhotoStrip it={it} paths={listingPhotoPaths(it)} urls={photoUrls} max={MAX_LISTING_PHOTOS} busy={photoBusy} locked={false} onAdd={onAddPhotos} {...photo_} />
       )}
-      {it.status === 'listed' && !(it.ebay_picture_urls || []).length && (
+      {liveChanges(it).length > 0 && (
         <div role="status" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.75rem', padding: 8, border: '1px dashed var(--warn)' }}>
-          <span className="accent-amber" style={{ flex: 1, minWidth: 160 }}>These photos aren't on eBay yet. The live listing still shows the old ones.</span>
-          <button className="btn-primary" disabled={!!photoBusy} onClick={onSendPhotos} style={{ padding: '6px 12px', fontSize: '0.75rem' }}>Update photos on eBay</button>
+          <span className="accent-amber" style={{ flex: 1, minWidth: 160 }}>Not on eBay yet: {liveChanges(it).join(', ')}. The live listing still shows the old {liveChanges(it).length === 1 ? 'one' : 'ones'}.</span>
+          <button className="btn-primary" disabled={!!photoBusy} onClick={onSendPhotos} style={{ padding: '6px 12px', fontSize: '0.75rem' }}>Update on eBay</button>
         </div>
       )}
 
@@ -459,6 +482,17 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
           {it.promoted_at && <div className="accent-green" style={{ fontSize: '0.7rem' }}>Promoted Listings: on</div>}
           {it.promo_error && <div className="accent-amber" style={{ fontSize: '0.7rem' }}>{it.promo_error}</div>}
           {it.ebay_url && <a href={it.ebay_url} target="_blank" rel="noreferrer" className="accent-green" style={{ fontSize: '0.75rem' }}>View on eBay #{it.ebay_item_id} <ExternalLink size={10} /></a>}
+          {it.imported_from_ebay_at && <div className="ink-faint" style={{ fontSize: '0.65rem' }}>Brought in from eBay {new Date(it.imported_from_ebay_at).toLocaleDateString()}</div>}
+        </div>
+      )}
+      {it.status === 'listed' && (
+        <div style={{ display: 'grid', gap: 4 }}>
+          <input className="bg-input" style={inp} value={d.title || ''} aria-label="eBay title" placeholder="eBay title" maxLength={80} onChange={(e) => field('title', e.target.value)} onBlur={() => d.title !== it.title && commit({ title: d.title })} />
+          <div className="ink-faint" style={{ fontSize: '0.65rem' }}>Title {String(d.title || '').length}/80</div>
+          <textarea className="bg-input" style={{ ...inp, minHeight: 92, resize: 'vertical', lineHeight: 1.4 }} value={d.description || ''} aria-label="eBay description"
+            placeholder={it.imported_from_ebay_at ? 'eBay description' : 'Written from the card\'s details (as on eBay). Type here to replace it.'}
+            onChange={(e) => field('description', e.target.value)} onBlur={() => (d.description || '') !== (it.description || '') && commit({ description: d.description })} />
+          <div className="ink-faint" style={{ fontSize: '0.65rem' }}>Edits here go to eBay when you tap "Update on eBay". Change the price in Prices.</div>
         </div>
       )}
       {it.status === 'approved' && <PublishStatus it={it} />}
@@ -913,6 +947,56 @@ function ListingSetup({ s, set }) {
         ))}
         <div className="ink-faint" style={{ gridColumn: '1 / -1', fontSize: '0.7rem' }}>The package each card ships in. eBay needs it to work out calculated shipping. Check the card again after changing it.</div>
       </div>
+    </div>
+  );
+}
+
+// Listings made on eBay before CardDesk: bring them in as live cards (nothing changes on eBay).
+function ImportPanel({ onDone }) {
+  const [info, setInfo] = useState(null);
+  const [run, setRun] = useState(null);   // { done, total, failed: [] }
+  const [err, setErr] = useState(null);
+  const load = useCallback(async () => {
+    const res = await apiFetch('/api/listing-import');
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) setInfo(data); else setErr(data.error || `Couldn't check eBay listings (${res.status})`);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  async function start() {
+    const ids = info?.pending || [];
+    setErr(null);
+    const failed = [];
+    setRun({ done: 0, total: ids.length, failed });
+    for (let i = 0; i < ids.length; i += 4) {
+      const r = await postJson('/api/listing-import', { item_ids: ids.slice(i, i + 4) }).catch((e) => ({ ok: false, data: { error: e.message } }));
+      if (!r.ok) { setErr(r.data.error || `Import stopped (${r.status})`); break; }
+      failed.push(...r.data.results.filter((x) => !x.ok));
+      setRun({ done: Math.min(i + 4, ids.length), total: ids.length, failed: [...failed] });
+    }
+    await onDone();
+    await load();
+    setRun((x) => (x ? { ...x, finished: true } : x));
+  }
+  if (!info && !err) return null;
+  const busy = run && !run.finished;
+  if (info && !info.pending.length && !run && !err) return null;
+  return (
+    <div className="bg-card" style={{ padding: 12, display: 'grid', gap: 6, fontSize: '0.8rem' }}>
+      {info && info.pending.length > 0 && !busy && (
+        <>
+          <div><b>{info.pending.length} of your eBay listings</b> {info.pending.length === 1 ? 'was' : 'were'} made before CardDesk. Bring them in to edit their photos, title and description here.</div>
+          <div className="ink-faint" style={{ fontSize: '0.72rem' }}>Nothing changes on eBay: CardDesk reads each listing and copies its photos. Takes a minute or two; keep this page open.</div>
+          <button className="btn-primary" onClick={start} style={{ padding: '8px 14px', justifySelf: 'start' }}>Bring in {info.pending.length} listing{info.pending.length === 1 ? '' : 's'}</button>
+        </>
+      )}
+      {run && (
+        <div role="status">
+          {busy ? <><Loader size={12} className="spin" /> Bringing in listings: {run.done} of {run.total}…</> : <span className="accent-green">Brought in {run.done - run.failed.length} listing{run.done - run.failed.length === 1 ? '' : 's'}.</span>}
+          <div style={{ height: 6, background: 'var(--well)', borderRadius: 3, marginTop: 6 }}><div style={{ height: 6, width: `${run.total ? (run.done / run.total) * 100 : 100}%`, background: 'var(--leaf)', borderRadius: 3, transition: 'width .3s' }} /></div>
+          {run.failed.length > 0 && <div className="accent-amber" style={{ fontSize: '0.72rem', marginTop: 4 }}>{run.failed.length} couldn't be brought in (for example #{run.failed[0].item_id}: {run.failed[0].error}). Tap the button again to retry them.</div>}
+        </div>
+      )}
+      {err && <div className="accent-red" style={{ fontSize: '0.75rem' }}>{err}</div>}
     </div>
   );
 }
