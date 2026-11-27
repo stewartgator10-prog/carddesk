@@ -10,6 +10,7 @@ import { monthStart, MODEL_LABELS } from './ai-usage.js';
 import { sendToSnap, recheckAlerts } from './collection.js';
 import { setBestOffer, revisePrices } from './trading-price.js';
 import { recordPriceChanges } from './seller-adapter.js';
+import { autoCrop, undoEdit, setPhotoOrder, pushPhotosToEbay, photosOutOfDate } from './snap-photos.js';
 import { validateChanges, checkAgainstListings } from '../functions/seller-reprice.js';
 
 export const MAX_CHECK_PER_CALL = 6;     // each check uploads photos + calls eBay; keeps a call well under the time limit
@@ -37,6 +38,8 @@ export function cardView(it) {
     possible_misprint: it.misprint_flag ? (it.misprint_notes || 'yes') : null,
     misprint_confirmed: !!it.misprint_confirmed,
     photo_count: listingPhotoPaths(it).length,
+    photos_straightened: Object.keys(it.photo_edits || {}).length,
+    photos_not_on_ebay_yet: photosOutOfDate(it),
     ebay_check: it.publish_state ? {
       state: it.publish_state, passed: it.publish_check?.ok ?? null, errors: it.publish_check?.errors || [],
       warnings: it.publish_check?.warnings || [], listing_fee: it.publish_check?.fees?.total ?? null, error: it.publish_error || null,
@@ -372,4 +375,36 @@ export async function changeListingPrices({ db, userId, getToken, deps = {} }, {
     results: results.map((r) => ({ item_id: r.itemId, ok: r.ok, price: r.price, error: r.error || null, notes: r.warnings?.length ? r.warnings : undefined })),
     note: 'If eBay refused a price because of Best Offer, set_best_offer with enabled=false (after the user\'s yes) and try again.',
   };
+}
+
+// A card's photos. Photo numbers are 1-based in eBay order; photo 1 is the main photo.
+export async function editPhotos({ db, userId, settings, getToken, deps = {} }, { id, action, photo_number, order, user_confirmed }) {
+  const item = (await must(db.from('snap_items').select('*').eq('user_id', userId).eq('id', String(id || ''))))[0];
+  if (!item || item.status === 'discarded') throw toolError('No such card. Use list_cards for ids.');
+  const paths = listingPhotoPaths(item);
+  const pick = (n) => { const p = paths[Number(n) - 1]; if (!p) throw toolError(`This card has ${paths.length} photo${paths.length === 1 ? '' : 's'}; photo_number must be 1 to ${paths.length}.`); return p; };
+  const view = (it) => ({ id: it.id, photos: listingPhotoPaths(it).map((p, i) => ({ photo_number: i + 1, main: i === 0, straightened: !!(it.photo_edits || {})[p] })), photos_not_on_ebay_yet: photosOutOfDate(it) });
+  const wrapErr = async (fn) => { try { return await fn(); } catch (e) { if (e.toolError) throw e; throw toolError(e.message); } };
+  if (action === 'auto_fix') {
+    let cur = item;
+    const targets = photo_number ? [pick(photo_number)] : paths.filter((p) => !(item.photo_edits || {})[p]);
+    const skipped = [];
+    for (const p of targets) {
+      const at = listingPhotoPaths(cur).indexOf(p);
+      try { cur = await (deps.autoCrop || autoCrop)({ db, userId, item: cur, path: p, settings }); }
+      catch (e) { if (e.code === 'BUDGET') throw toolError(e.message); skipped.push({ photo_number: at + 1, reason: e.message }); }
+    }
+    return { ...view(cur), skipped, note: 'Straightened and cropped so the card fills the photo; the card itself is not retouched and the originals are kept (action undo).' };
+  }
+  if (action === 'undo') return view(await wrapErr(() => undoEdit({ db, userId, item, path: pick(photo_number) })));
+  if (action === 'set_order') {
+    const nums = (order || []).map(Number);
+    if (!nums.length) throw toolError('order lists photo numbers in the new order, main photo first. Photos left out are removed.');
+    return view(await wrapErr(() => setPhotoOrder({ db, userId, item, paths: nums.map(pick) })));
+  }
+  if (action === 'update_ebay') {
+    if (user_confirmed !== true) throw toolError('This replaces the photos on a LIVE eBay listing. Tell the user, get a clear yes, then call again with user_confirmed=true.');
+    return view(await wrapErr(async () => pushPhotosToEbay({ db, userId, token: await getToken(), item, ...(deps.call ? { call: deps.call } : {}), ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}) })));
+  }
+  throw toolError('action must be auto_fix, undo, set_order or update_ebay.');
 }

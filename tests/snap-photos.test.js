@@ -129,3 +129,18 @@ test('live listing: photo changes mark it out of date; sending replaces the pict
   await assert.rejects(pushPhotosToEbay({ db, userId: U, token: 't', item: { ...item, status: 'approved' }, call, fetchImpl }), /not live on eBay/);
   assert.match(buildPictureReviseXml('1', ['a&b']), /a&amp;b/);
 });
+
+test('AI-app tool: photo numbers, auto-fix every unedited photo, reorder; live update needs the user\'s yes', async () => {
+  const { editPhotos } = await import('../netlify/lib/mcp-tools.js');
+  const { db } = setup({ status: 'listed', ebay_item_id: '99' });
+  const deps = { readCorners: async () => ({ read: { card_found: true, graded: false, card_corners: corners }, usage: { input_tokens: 1600, output_tokens: 120 } }) };
+  const ctx = { db, userId: U, settings: SNAP_DEFAULTS, getToken: async () => 't', deps: { autoCrop: (a) => autoCrop({ ...a, deps }) } };
+  const fixed = await editPhotos(ctx, { id: 'c1', action: 'auto_fix' });
+  assert.deepEqual(fixed.photos.map((p) => p.straightened), [true, true, true]);
+  assert.equal(fixed.photos_not_on_ebay_yet, true);
+  const re = await editPhotos(ctx, { id: 'c1', action: 'set_order', order: [3, 1] });
+  assert.equal(re.photos.length, 2);
+  await assert.rejects(editPhotos(ctx, { id: 'c1', action: 'undo', photo_number: 5 }), /photo_number must be 1 to 2/);
+  await assert.rejects(editPhotos(ctx, { id: 'c1', action: 'update_ebay' }), /get a clear yes/);
+  await assert.rejects(editPhotos(ctx, { id: 'nope', action: 'undo', photo_number: 1 }), /No such card/);
+});
