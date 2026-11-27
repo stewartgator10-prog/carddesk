@@ -180,8 +180,8 @@ export function buildServer(ctx) {
     inputSchema: {
       id: z.string().describe('Card id from list_cards'),
       action: z.enum(['auto_fix', 'undo', 'set_order', 'update_ebay']),
-      photo_number: z.number().int().min(1).max(12).optional(),
-      order: z.array(z.number().int().min(1).max(12)).max(12).optional(),
+      photo_number: z.number().int().min(1).max(24).optional(),
+      order: z.array(z.number().int().min(1).max(24)).max(24).optional(),
       user_confirmed: z.boolean().optional().describe('update_ebay only: true after the user explicitly approved'),
     }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, run('edit_card_photos', (c, a) => tools.editPhotos(c, a)));

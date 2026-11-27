@@ -410,8 +410,8 @@ async function photoLink(db, path) {
 // well inside the time limit. Returns eBay's picture links in the same order.
 export async function uploadListingPhotos({ db, token, item, paths, fetchImpl = fetch }) {
   const urls = [];
-  for (let i = 0; i < paths.length; i += 4) {
-    urls.push(...await Promise.all(paths.slice(i, i + 4).map(async (p, j) =>
+  for (let i = 0; i < paths.length; i += 6) {
+    urls.push(...await Promise.all(paths.slice(i, i + 6).map(async (p, j) =>
       uploadPicture({ token, url: await photoLink(db, p), imageBytes: () => photoBytes(db, p), name: `${snapSku(item.id)}-${i + j + 1}`, fetchImpl }))));
   }
   return urls;
@@ -493,6 +493,7 @@ export async function publishSnapItem({ db, userId, token, item, settings, call 
   const now = new Date().toISOString();
   const url = `https://www.ebay.com/itm/${itemId}`;
   await must(db.from('snap_items').update({ status: 'listed', publish_state: 'listed', ebay_item_id: itemId, ebay_url: url, listed_at: now, publish_error: null,
+    ebay_live: { title: item.title ?? null, description: item.description ?? null },
     publish_check: { ...check, listingFees: fees } }).eq('id', item.id).eq('user_id', userId));
   // The card is now stock with its cost, tied to the listing so its sale matches automatically.
   await must(db.from('inventory').insert({

@@ -32,8 +32,8 @@ export const LISTABLE_GAMES = [...CATALOG_GAMES, 'other'];
 const isEnglish = (lang) => /^english$/i.test(lang || 'English');
 
 // A listing's photos in eBay order: the main (identified) photo first, then the extras.
-// eBay itself allows 24; 12 keeps the check quick and is plenty for a single card.
-export const MAX_LISTING_PHOTOS = 12;
+// eBay's own limit. Listings brought in from eBay can already have this many.
+export const MAX_LISTING_PHOTOS = 24;
 export function listingPhotoPaths(item) {
   const extras = Array.isArray(item?.extra_photo_paths) && item.extra_photo_paths.length
     ? item.extra_photo_paths
@@ -202,4 +202,50 @@ export function summarizeTrial(rows) {
       medianLatencyMs: lat.length ? lat[Math.floor(lat.length / 2)] : null,
     };
   }).sort((a, b) => a.model.localeCompare(b.model));
+}
+
+// ---------- cards that are live on eBay ----------
+// What a live card has that eBay doesn't show yet. ebay_live holds the title and description eBay
+// has; photos are out of date when eBay's copies were cleared by a photo change.
+export function liveChanges(item) {
+  if (item?.status !== 'listed') return [];
+  const live = item.ebay_live || {};
+  const same = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
+  const out = [];
+  if (!(item.ebay_picture_urls || []).length) out.push('photos');
+  if (item.ebay_live && !same(item.title, live.title)) out.push('title');
+  if (item.ebay_live && !same(item.description, live.description)) out.push('description');
+  return out;
+}
+
+// An eBay listing description (HTML, often a seller template) as plain paragraphs for editing.
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
+export function htmlToText(html) {
+  return String(html || '')
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n- ')
+    .replace(/<\/(p|div|h[1-6]|li|ul|ol|tr|table|section|center)>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(#\d+|#x[0-9a-f]+|[a-z0-9]+);/gi, (m, e) => {
+      if (/^#x/i.test(e)) return String.fromCodePoint(parseInt(e.slice(2), 16));
+      if (/^#\d/.test(e)) return String.fromCodePoint(Number(e.slice(1)));
+      return ENTITIES[e.toLowerCase()] ?? m;
+    })
+    .replace(/[ \t ]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// The game, from an eBay title written by hand.
+export function gameFromTitle(title) {
+  const t = String(title || '');
+  if (/pok[eé]mon/i.test(t)) return 'pokemon';
+  if (/magic the gathering|\bmtg\b/i.test(t)) return 'mtg';
+  if (/yu-?gi-?oh/i.test(t)) return 'yugioh';
+  if (/one piece/i.test(t)) return 'one_piece';
+  if (/lorcana/i.test(t)) return 'lorcana';
+  if (/\b(topps|panini|bowman|upper deck|donruss|prizm)\b/i.test(t)) return 'sports';
+  return 'other';
 }
