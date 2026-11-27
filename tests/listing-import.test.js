@@ -42,7 +42,7 @@ test('description HTML to editable text; game from a hand-written title', () => 
 
 test('pending: active Buy It Now listings that are not cards yet', async () => {
   const p = await pendingImports({ db: setup(), userId: U });
-  assert.deepEqual(p, { active: 3, inCardDesk: 2, pending: ['111'] });
+  assert.deepEqual(p, { active: 3, inCardDesk: 2, pending: ['111'], needsFullSize: [] });
 });
 
 test('import: reads the listing, copies its photos, saves a live card with nothing to send back', async () => {
@@ -107,7 +107,8 @@ test('changes on a live card: title, description and photos go to eBay together;
   db.storage.from().createSignedUrl = undefined;
   await pushChangesToEbay({ db, userId: U, token: 't', item: { ...card }, call, fetchImpl });
   assert.match(sent, /<Description><!\[CDATA\[<p>Pack fresh\.<\/p><p>Ships in a toploader\.<\/p>\]\]><\/Description>/);
-  assert.match(sent, /<PictureDetails>(<PictureURL>https:\/\/i\.ebayimg\.com\/new\.jpg<\/PictureURL>){2}<\/PictureDetails>/);
+  // The photos themselves didn't change, so eBay's own copies are reused: nothing is uploaded.
+  assert.match(sent, /<PictureDetails><PictureURL>https:\/\/i\.ebayimg\.com\/00\/s\/a\/\$_57\.JPG<\/PictureURL><PictureURL>https:\/\/i\.ebayimg\.com\/00\/s\/b\/\$_57\.JPG<\/PictureURL><\/PictureDetails>/);
   assert.doesNotMatch(sent, /<Title>/);
   assert.deepEqual(liveChanges(card), []);
   await assert.rejects(pushChangesToEbay({ db, userId: U, token: 't', item: { ...card }, call }), /Nothing to update/);
@@ -120,4 +121,45 @@ test('GetItem parsing: photo list, graded slabs keep NM, missing pieces are null
   assert.equal(cardFromItem(r).pictures.length, 2);
   const g = parseXml(getItem('1').replace('<ConditionID>4000', '<ConditionID>2750')).GetItemResponse.Item[0];
   assert.deepEqual([cardFromItem(g).graded, cardFromItem(g).condition], [true, 'NM']);
+});
+
+test('full-size photos: preview links become full-size ones; old small copies are refreshed and crops redone', async () => {
+  const { fullSizeEbayPhoto, refreshFullSize, needsFullSize } = await import('../netlify/lib/listing-import.js');
+  assert.equal(fullSizeEbayPhoto('https://i.ebayimg.com/00/s/MTYwMFgxMjAw/z/6BUAAeSw5XJpgVn~/$_1.JPG?set_id=8800005007'), 'https://i.ebayimg.com/images/g/6BUAAeSw5XJpgVn~/s-l1600.jpg');
+  assert.equal(fullSizeEbayPhoto('https://i.ebayimg.com/images/g/qocAAeSwOTVqvEI5/s-l500.webp'), 'https://i.ebayimg.com/images/g/qocAAeSwOTVqvEI5/s-l1600.jpg');
+  assert.equal(fullSizeEbayPhoto('https://example.com/a.jpg'), 'https://example.com/a.jpg');
+
+  // New imports ask for the full-size picture first, and fall back to the given link.
+  const asked = [];
+  const db = setup();
+  const r = await importListing({ db, userId: U, token: 't', itemId: '111', call: async () => getItem('111').replaceAll('/s/a/$_57', '/s/MTYw/z/AAA/$_1').replaceAll('/s/b/$_57', '/s/MTYw/z/BBB/$_1'),
+    fetchImpl: async (url) => { asked.push(url); return String(url).includes('BBB/s-l1600') ? new Response('', { status: 404 }) : jpegResponse(); } });
+  assert.deepEqual(asked, ['https://i.ebayimg.com/images/g/AAA/s-l1600.jpg', 'https://i.ebayimg.com/images/g/BBB/s-l1600.jpg', 'https://i.ebayimg.com/00/s/MTYw/z/BBB/$_1.JPG']);
+  assert.equal(needsFullSize(r.item), false);
+  assert.equal(Object.keys(r.item.ebay_live.photos).length, 2);
+
+  // A card from before the fix: small copies, one straightened photo.
+  const jpeg = (await import('jpeg-js')).default;
+  const big = (() => { const W = 800, H = 1000, d = new Uint8Array(W * H * 4); for (let i = 0; i < W * H; i++) { const x = i % W, y = (i / W) | 0; const v = x > 100 && x < 700 && y > 100 && y < 900 ? 220 : 30; d.set([v, v, v, 255], i * 4); } return Buffer.from(jpeg.encode({ width: W, height: H, data: d }, 90).data); })();
+  const old = { id: 'old1', user_id: U, status: 'listed', ebay_item_id: '111', imported_from_ebay_at: '2026-11-27', game: 'pokemon',
+    photo_path: 'u1/ebay-import/old1-p1-edit-aa.jpg', extra_photo_paths: ['u1/ebay-import/old1-p2.jpg'], ebay_picture_urls: null,
+    photo_edits: { 'u1/ebay-import/old1-p1-edit-aa.jpg': { original: 'u1/ebay-import/old1-p1.jpg', corners: { tl: { x: 0.125, y: 0.1 }, tr: { x: 0.875, y: 0.1 }, br: { x: 0.875, y: 0.9 }, bl: { x: 0.125, y: 0.9 } } } },
+    title: 'x', description: 'y', ebay_live: { title: 'x', description: 'y' } };
+  const db2 = fakeDb({ snap_items: [old] }, {}, { files: { 'u1/ebay-import/old1-p1.jpg': Buffer.from('small'), 'u1/ebay-import/old1-p2.jpg': Buffer.from('small'), 'u1/ebay-import/old1-p1-edit-aa.jpg': Buffer.from('small') } });
+  assert.equal(needsFullSize(old), true);
+  const out = await refreshFullSize({ db: db2, userId: U, token: 't', snapId: 'old1', call: async () => getItem('111'), fetchImpl: async () => new Response(big, { status: 200, headers: { 'content-type': 'image/jpeg' } }) });
+  assert.equal(out.refreshed, 2);
+  assert.equal(db2.files['u1/ebay-import/old1-p1.jpg'].length, big.length, 'original replaced at full size');
+  assert.ok(db2.files['u1/ebay-import/old1-p1-edit-aa.jpg'].length > 10000, 'crop redone from the full-size photo');
+  const saved = db2.tables.snap_items[0];
+  assert.equal(saved.ebay_live.full_size, true);
+  assert.equal(saved.ebay_live.photos['u1/ebay-import/old1-p2.jpg'], 'https://i.ebayimg.com/00/s/b/$_57.JPG');
+  assert.equal((await refreshFullSize({ db: db2, userId: U, token: 't', snapId: 'old1', call: async () => { throw new Error('no'); } })).skipped, true);
+
+  // Updating eBay now reuses the unchanged photo and uploads only the straightened one.
+  let sent = null; const uploads = [];
+  const fetchImpl = async (url) => { uploads.push(url); return String(url).includes('create_image') ? new Response('', { status: 201, headers: { location: 'https://apim.ebay.com/commerce/media/v1_beta/image/i1' } }) : new Response(JSON.stringify({ imageUrl: 'https://i.ebayimg.com/edit.jpg' }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+  await pushChangesToEbay({ db: db2, userId: U, token: 't', item: { ...saved }, fetchImpl, call: async (t, n, xml) => { sent = xml; return '<ReviseFixedPriceItemResponse><Ack>Success</Ack></ReviseFixedPriceItemResponse>'; } });
+  assert.match(sent, /<PictureURL>https:\/\/i\.ebayimg\.com\/edit\.jpg<\/PictureURL><PictureURL>https:\/\/i\.ebayimg\.com\/00\/s\/b\/\$_57\.JPG<\/PictureURL>/);
+  assert.equal(uploads.filter((u) => String(u).includes('create_image')).length, 1, 'one upload, for the edited photo');
 });

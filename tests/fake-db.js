@@ -9,8 +9,8 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
         download: async (path) => (files[path]
           ? { data: new Blob([files[path]], { type: 'image/jpeg' }), error: null }
           : { data: null, error: { message: 'Object not found' } }),
-        upload: async (path, body) => {
-          if (files[path]) return { data: null, error: { message: 'The resource already exists' } };
+        upload: async (path, body, opts = {}) => {
+          if (files[path] && !opts.upsert) return { data: null, error: { message: 'The resource already exists' } };
           files[path] = Buffer.from(body); return { data: { path }, error: null };
         },
         remove: async (paths) => { paths.forEach((p) => delete files[p]); return { data: paths, error: null }; },
@@ -23,6 +23,7 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
         eq(c, v) { filters.push((r) => r[c] === v); return b; },
         in(c, vs) { filters.push((r) => vs.includes(r[c])); return b; },
         is(c, v) { filters.push((r) => r[c] === v); return b; },
+        not(c, op, v) { filters.push((r) => (op === 'is' && v === null ? r[c] != null : r[c] !== v)); return b; },
         gte(c, v) { filters.push((r) => r[c] >= v); return b; },
         ilike(c, pat) { const re = new RegExp(`^${pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`, 'i'); filters.push((r) => re.test(r[c] ?? '')); return b; },
         insert(rows) { op = 'insert'; payload = Array.isArray(rows) ? rows : [rows]; return b; },

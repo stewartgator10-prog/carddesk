@@ -375,7 +375,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </>}
           </div>
           {ebayBusy && <div className="accent-amber" style={{ fontSize: '0.8rem' }}><Loader size={12} className="spin" /> {ebayBusy.label}: {ebayBusy.done} of {ebayBusy.total}…</div>}
-          {(filter === 'listed' || filter === 'changed') && <ImportPanel onDone={loadItems} />}
+          {(filter === 'listed' || filter === 'changed') && <ImportPanel onDone={loadItems} onPhotosChanged={() => setPhotoUrls({})} />}
           {(filter === 'listed' || filter === 'changed' || items.length > 40) && (
             <input className="bg-input" type="search" aria-label="Search cards" placeholder="Search title, item number or SKU" value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '8px 12px', fontSize: '0.85rem' }} />
           )}
@@ -952,8 +952,10 @@ function ListingSetup({ s, set }) {
 }
 
 // Listings made on eBay before CardDesk: bring them in as live cards (nothing changes on eBay).
-function ImportPanel({ onDone }) {
+function ImportPanel({ onDone, onPhotosChanged }) {
   const [info, setInfo] = useState(null);
+  const [fix, setFix] = useState(null);   // full-size photo refresh: { done, total, failed }
+  const fixStarted = useRef(false);
   const [run, setRun] = useState(null);   // { done, total, failed: [] }
   const [err, setErr] = useState(null);
   const load = useCallback(async () => {
@@ -962,6 +964,28 @@ function ImportPanel({ onDone }) {
     if (res.ok) setInfo(data); else setErr(data.error || `Couldn't check eBay listings (${res.status})`);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Cards brought in before the fix have eBay's small preview photos. Swap in full-size ones once,
+  // automatically (reads eBay and re-copies; nothing changes on eBay).
+  useEffect(() => {
+    const ids = info?.needsFullSize || [];
+    if (!ids.length || fixStarted.current) return;
+    fixStarted.current = true;
+    (async () => {
+      const failed = [];
+      setFix({ done: 0, total: ids.length, failed });
+      for (let i = 0; i < ids.length; i += 4) {
+        const r = await postJson('/api/listing-import', { action: 'full_size', ids: ids.slice(i, i + 4) }).catch((e) => ({ ok: false, data: { error: e.message } }));
+        if (!r.ok) { failed.push({ id: '', error: r.data.error || `stopped (${r.status})` }); break; }
+        failed.push(...r.data.results.filter((x) => !x.ok));
+        setFix({ done: Math.min(i + 4, ids.length), total: ids.length, failed: [...failed] });
+      }
+      onPhotosChanged?.();
+      await onDone();
+      setFix((x) => ({ ...x, finished: true }));
+    })();
+  }, [info]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function start() {
     const ids = info?.pending || [];
     setErr(null);
@@ -979,7 +1003,7 @@ function ImportPanel({ onDone }) {
   }
   if (!info && !err) return null;
   const busy = run && !run.finished;
-  if (info && !info.pending.length && !run && !err) return null;
+  if (info && !info.pending.length && !run && !err && !fix) return null;
   return (
     <div className="bg-card" style={{ padding: 12, display: 'grid', gap: 6, fontSize: '0.8rem' }}>
       {info && info.pending.length > 0 && !busy && (
@@ -994,6 +1018,14 @@ function ImportPanel({ onDone }) {
           {busy ? <><Loader size={12} className="spin" /> Bringing in listings: {run.done} of {run.total}…</> : <span className="accent-green">Brought in {run.done - run.failed.length} listing{run.done - run.failed.length === 1 ? '' : 's'}.</span>}
           <div style={{ height: 6, background: 'var(--well)', borderRadius: 3, marginTop: 6 }}><div style={{ height: 6, width: `${run.total ? (run.done / run.total) * 100 : 100}%`, background: 'var(--leaf)', borderRadius: 3, transition: 'width .3s' }} /></div>
           {run.failed.length > 0 && <div className="accent-amber" style={{ fontSize: '0.72rem', marginTop: 4 }}>{run.failed.length} couldn't be brought in (for example #{run.failed[0].item_id}: {run.failed[0].error}). Tap the button again to retry them.</div>}
+        </div>
+      )}
+      {fix && (
+        <div role="status" style={{ fontSize: '0.78rem' }}>
+          {!fix.finished
+            ? <><Loader size={12} className="spin" /> Getting full-size photos from eBay for listings you brought in: {fix.done} of {fix.total}…</>
+            : <span className="accent-green">Full-size photos ready for {fix.done - fix.failed.length} listing{fix.done - fix.failed.length === 1 ? '' : 's'}. Straightened photos were redone from them.</span>}
+          {fix.finished && fix.failed.length > 0 && <div className="accent-amber" style={{ fontSize: '0.72rem' }}>{fix.failed.length} couldn't be refreshed ({fix.failed[0].error}). Open this tab again to retry.</div>}
         </div>
       )}
       {err && <div className="accent-red" style={{ fontSize: '0.75rem' }}>{err}</div>}

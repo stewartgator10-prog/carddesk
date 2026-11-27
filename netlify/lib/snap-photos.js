@@ -153,10 +153,17 @@ export async function pushChangesToEbay({ db, userId, token, item, call = tradin
   const title = String(item.title || '').trim();
   if (changes.includes('title') && (!title || title.length > 80)) throw fail('The title must be 1 to 80 characters.', 400);
   let urls = null;
+  let onEbay = { ...(item.ebay_live?.photos || {}) };   // photo path -> the picture eBay already hosts for it
   if (changes.includes('photos')) {
     const paths = listingPhotoPaths(item);
     if (paths.some((p) => !String(p).startsWith(`${userId}/`))) throw fail('One of the photos does not belong to you.', 403);
-    urls = await uploadListingPhotos({ db, token, item, paths, fetchImpl });
+    // Photos eBay already has (unchanged since import or the last update) are reused as they are;
+    // only new or edited photos are uploaded.
+    const toUpload = paths.filter((p) => !onEbay[p]);
+    const uploaded = toUpload.length ? await uploadListingPhotos({ db, token, item, paths: toUpload, fetchImpl }) : [];
+    toUpload.forEach((p, n) => { onEbay[p] = uploaded[n]; });
+    urls = paths.map((p) => onEbay[p]);
+    onEbay = Object.fromEntries(paths.map((p) => [p, onEbay[p]]));
   }
   const xml = await call(token, 'ReviseFixedPriceItem', buildReviseXml(item.ebay_item_id, {
     urls,
@@ -165,7 +172,7 @@ export async function pushChangesToEbay({ db, userId, token, item, call = tradin
   }));
   const { errors } = responseOf(xml, 'ReviseFixedPriceItem');
   if (errors.length) throw fail(`eBay didn't take the changes: ${errors.join('; ')}`, 502);
-  const patch = { ebay_live: { title: item.title ?? null, description: item.description ?? null } };
+  const patch = { ebay_live: { ...(item.ebay_live || {}), title: item.title ?? null, description: item.description ?? null, ...(urls ? { photos: onEbay } : {}) } };
   if (urls) patch.ebay_picture_urls = urls;
   await must(db.from('snap_items').update(patch).eq('id', item.id).eq('user_id', userId));
   const listing = {};
