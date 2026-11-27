@@ -3,7 +3,7 @@ import { Camera, Loader, X, Star, ChevronLeft, ChevronRight, Crop, Wand2, Undo2,
 import { supabase } from './lib/supabase.js';
 
 // A listing's photos: all of them in eBay order (main first). Tap one to choose what to do with it.
-export function PhotoStrip({ it, paths, urls, max, busy, locked, onAdd, onOrder, onAuto, onEdit, onUndo }) {
+export function PhotoStrip({ it, paths, urls, max, busy, locked, onAdd, onOrder, onAuto, onAutoAll, onEdit, onUndo }) {
   const [sel, setSel] = useState(null);
   const input = useRef(null);
   const edits = it.photo_edits || {};
@@ -12,6 +12,7 @@ export function PhotoStrip({ it, paths, urls, max, busy, locked, onAdd, onOrder,
   const move = (to) => { const o = [...paths]; o.splice(i, 1); o.splice(to, 0, sel); onOrder(o); if (to === 0) setSel(null); };
   const small = { padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' };
   const pageOnly = !!it.photo_crop;
+  const unedited = paths.filter((p, n) => !edits[p] && !(pageOnly && n === 0));
 
   return (
     <div style={{ display: 'grid', gap: 6, fontSize: '0.7rem' }}>
@@ -29,6 +30,11 @@ export function PhotoStrip({ it, paths, urls, max, busy, locked, onAdd, onOrder,
         ))}
         {!locked && paths.length < max && (
           <button className="btn-ghost" onClick={() => input.current?.click()} style={small}><Camera size={12} /> Add photos</button>
+        )}
+        {!locked && !busy && onAutoAll && unedited.length > 0 && (
+          <button className="btn-ghost" onClick={() => onAutoAll(unedited)} style={small} title="The AI straightens and crops each photo that isn't edited yet (about a cent each)">
+            <Wand2 size={12} /> Auto-fix {unedited.length === 1 ? 'photo' : `all ${unedited.length}`}
+          </button>
         )}
         {busy && <span className="ink-faint"><Loader size={11} className="spin" /> {busy}</span>}
         {!busy && !sel && <span className="ink-faint">{paths.length > 1 ? `${paths.length} photos, main first. Tap one to edit or move it.` : 'Tap the photo to straighten it. Add the back, corners, close-ups.'}</span>}
