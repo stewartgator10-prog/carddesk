@@ -16,6 +16,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@supabase/supabase-js": "^2.119.2",
     "fast-xml-parser": "^5.12.1",
+    "jpeg-js": "^0.4.4",
     "lucide-react": "^0.383.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

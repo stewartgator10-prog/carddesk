@@ -287,7 +287,7 @@ export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
   ].join('');
 }
 
-const wrap = (callName, inner) => `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents"><ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel>${inner}</${callName}Request>`;
+export const wrap = (callName, inner) => `<?xml version="1.0" encoding="utf-8"?><${callName}Request xmlns="urn:ebay:apis:eBLBaseComponents"><ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel>${inner}</${callName}Request>`;
 
 export function feesOf(r) {
   const fees = (r.Fees?.Fee || []).map((f) => ({ name: text(f.Name), amount: Number(text(f.Fee)) || 0 })).filter((f) => f.amount > 0);
@@ -406,6 +406,17 @@ async function photoLink(db, path) {
   return error ? null : data?.signedUrl || null;
 }
 
+// Copies the listing's photos to eBay, a few at a time so a card with many photos still finishes
+// well inside the time limit. Returns eBay's picture links in the same order.
+export async function uploadListingPhotos({ db, token, item, paths, fetchImpl = fetch }) {
+  const urls = [];
+  for (let i = 0; i < paths.length; i += 4) {
+    urls.push(...await Promise.all(paths.slice(i, i + 4).map(async (p, j) =>
+      uploadPicture({ token, url: await photoLink(db, p), imageBytes: () => photoBytes(db, p), name: `${snapSku(item.id)}-${i + j + 1}`, fetchImpl }))));
+  }
+  return urls;
+}
+
 // ---------- check and publish ----------
 async function must(p) { const { data, error } = await p; if (error) throw new Error(error.message); return data; }
 
@@ -438,11 +449,7 @@ export async function checkSnapItem({ db, userId, token, item, settings, call = 
     if (paths.some((p) => !String(p).startsWith(`${userId}/`))) throw Object.assign(new Error('One of the photos does not belong to you.'), { status: 403 });
     if (urls.length !== paths.length) {
       // A few at a time, so a card with many photos still finishes well inside the time limit.
-      urls = [];
-      for (let i = 0; i < paths.length; i += 4) {
-        urls.push(...await Promise.all(paths.slice(i, i + 4).map(async (p, j) =>
-          uploadPicture({ token, url: await photoLink(db, p), imageBytes: () => photoBytes(db, p), name: `${snapSku(item.id)}-${i + j + 1}`, fetchImpl }))));
-      }
+      urls = await uploadListingPhotos({ db, token, item, paths, fetchImpl });
     }
     const sku = item.sku || snapSku(item.id);
     const full = { ...item, sku, ebay_picture_urls: urls };
