@@ -210,3 +210,12 @@ test('the connector accepts an access key in Authorization or X-API-Key, and ref
   assert.equal(refused.status, 401);
   assert.match((await refused.json()).error, /not valid or was revoked/);
 });
+
+test('opening the connector address in a browser shows an explanation; an event-stream GET still gets 405', async () => {
+  const page = await handleMcp(new Request('https://site.test/mcp', { headers: { accept: 'text/html,application/xhtml+xml' } }));
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.match(html, /CardDesk AI connector/);
+  assert.match(html, /https:\/\/site\.test\/mcp/);
+  assert.equal((await handleMcp(new Request('https://site.test/mcp', { headers: { accept: 'text/event-stream' } }))).status, 405);
+});
