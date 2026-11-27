@@ -720,10 +720,10 @@ function AiConnector() {
   }
   return (
     <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12, display: 'grid', gap: 10 }}>
-      <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>CLAUDE APP CONNECTOR</h3>
+      <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>AI APP CONNECTOR</h3>
       <div className="ink-dim" style={{ fontSize: '0.75rem' }}>
-        Let the Claude app review, price, approve, check and publish your snapped cards, and answer profit questions, by chatting.
-        In Claude: Settings → Connectors → Add custom connector, paste this address, then Connect and sign in with your CardDesk account.
+        Let an AI app work CardDesk by chatting: review, price, approve, check and publish snapped cards; your collection and its alerts; prices and Best Offer on live listings; profit questions.
+        Claude: Settings → Connectors → Add custom connector, paste this address, then sign in with CardDesk. Muse, Grok and other apps: give them this address and an access key from below.
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <input className="bg-input" readOnly value={url} onFocus={(e) => e.target.select()} style={{ flex: 1, padding: '8px 10px', fontSize: '0.8rem' }} />
@@ -741,6 +741,63 @@ function AiConnector() {
           ))}
         {err && <div className="accent-amber" style={{ fontSize: '0.7rem', marginTop: 4 }}>{err}</div>}
       </div>
+      <AccessKeys url={url} />
+    </div>
+  );
+}
+
+// Personal access keys for AI apps that can't run "Sign in with CardDesk" (Muse, Grok...).
+function AccessKeys({ url }) {
+  const [keys, setKeys] = useState(null);
+  const [name, setName] = useState('Muse');
+  const [fresh, setFresh] = useState(null);       // the new key, shown once
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const call = async (method, body, qs = '') => {
+    const res = await apiFetch(`/api/access-keys${qs}`, { method, headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+    return data;
+  };
+  const load = useCallback(async () => { try { setKeys((await call('GET')).keys); } catch (e) { setErr(e.message); setKeys([]); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+  async function create() {
+    setBusy(true); setErr(null); setCopied(false);
+    try { const r = await call('POST', { name }); setFresh(r.key); load(); } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
+  async function revoke(k) {
+    if (!(await askConfirm(`Revoke the key "${k.name}" (${k.prefix}…)? Any app using it loses access to CardDesk right away.`, { title: 'Revoke key', confirmLabel: 'Revoke key', danger: true }))) return;
+    try { await call('DELETE', null, `?id=${encodeURIComponent(k.id)}`); if (fresh?.id === k.id) setFresh(null); load(); } catch (e) { setErr(e.message); }
+  }
+  return (
+    <div style={{ fontSize: '0.75rem', display: 'grid', gap: 8 }}>
+      <div className="ink-faint" style={{ letterSpacing: '0.1em', fontSize: '0.65rem' }}>ACCESS KEYS FOR OTHER AI APPS</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <input className="bg-input" aria-label="Name for the new key" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} style={{ flex: '1 1 140px', padding: '7px 10px', fontSize: '0.8rem' }} />
+        <button className="btn-ghost" disabled={busy || !name.trim()} onClick={create} style={{ padding: '7px 12px', fontSize: '0.75rem' }}>{busy ? <Loader size={12} className="spin" /> : 'Create key'}</button>
+      </div>
+      {fresh && (
+        <div role="status" style={{ border: '1.5px solid var(--leaf)', background: 'var(--good-wash)', padding: 10, display: 'grid', gap: 6 }}>
+          <div><b>Your new key for {fresh.name}.</b> Copy it now: CardDesk won't show it again.</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input className="bg-input" readOnly aria-label="New access key" value={fresh.key} onFocus={(e) => e.target.select()} style={{ flex: 1, padding: '7px 10px', fontSize: '0.78rem', fontFamily: 'monospace' }} />
+            <button className="btn-primary" onClick={() => { navigator.clipboard?.writeText(fresh.key); setCopied(true); }} style={{ padding: '7px 12px', fontSize: '0.75rem' }}>{copied ? 'Copied' : 'Copy key'}</button>
+          </div>
+          <div className="ink-dim">In the AI app, connect to <b>{url}</b> and enter this key where it asks for an API key or token (sent as "Authorization: Bearer" or "X-API-Key"). Use the app's secure credential box, not the chat.</div>
+          <button className="btn-icon" onClick={() => setFresh(null)} style={{ justifySelf: 'start', fontSize: '0.72rem', textDecoration: 'underline' }}>I've saved it</button>
+        </div>
+      )}
+      {keys === null ? <Loader size={13} className="spin ink-faint" /> : keys.length === 0 ? <div className="ink-faint">No keys yet.</div>
+        : keys.map((k) => (
+          <div key={k.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>{k.name} <span className="ink-faint" style={{ fontFamily: 'monospace' }}>{k.prefix}…</span>
+              <div className="ink-faint" style={{ fontSize: '0.65rem' }}>created {new Date(k.created_at).toLocaleDateString()} · {k.last_used_at ? `last used ${new Date(k.last_used_at).toLocaleString()}` : 'not used yet'}</div></div>
+            <button className="btn-ghost" onClick={() => revoke(k)} aria-label={`Revoke key ${k.name}`} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>Revoke</button>
+          </div>
+        ))}
+      {err && <div className="accent-amber" style={{ fontSize: '0.7rem' }}>{err}</div>}
     </div>
   );
 }
