@@ -175,7 +175,23 @@ export default function SnapTab({ userId, settings, setSettings }) {
     if (added.length) await save(item.id, { extra_photo_paths: [...extrasOf(item), ...added], back_photo_path: null, ebay_picture_urls: null });
     if (files.length > room) setMsg({ type: 'error', text: `Added ${added.length} of ${files.length}: a listing can have up to ${MAX_LISTING_PHOTOS} photos.` });
     // Straighten the new photos too. Close-ups with no whole card in them are simply left as they are.
-    if (s.snapAutoCrop !== false) for (const path of added) await photoCall(item, { action: 'autocrop', path }, 'Straightening…', { quiet: true });
+    if (s.snapAutoCrop !== false && added.length) await autoFixPhotos(item, added, { quiet: true });
+  }
+
+  // The AI straightens each photo in turn. Photos without one whole card in them (close-ups) are left as they are.
+  async function autoFixPhotos(item, paths, { quiet = false } = {}) {
+    let fixed = 0, noCard = 0;
+    for (const [n, path] of paths.entries()) {
+      setPhotoBusy((b) => ({ ...b, [item.id]: paths.length > 1 ? `Straightening ${n + 1} of ${paths.length}…` : 'Straightening…' }));
+      const r = await postJson('/api/snap-photos', { id: item.id, action: 'autocrop', path }).catch((e) => ({ ok: false, data: { error: e.message } }));
+      if (r.ok) { fixed += 1; patchLocal(item.id, r.data.item); continue; }
+      if (r.status === 422) { noCard += 1; continue; }
+      setMsg({ type: 'error', text: r.data.error || `Auto-fix failed (${r.status})` });
+      break;
+    }
+    setPhotoBusy((b) => { const x = { ...b }; delete x[item.id]; return x; });
+    loadUsage();
+    if (!quiet && fixed + noCard > 0) setMsg({ type: 'ok', text: `Straightened ${fixed} photo${fixed === 1 ? '' : 's'}.${noCard ? ` ${noCard} didn't show one whole card (a close-up?) and ${noCard === 1 ? 'was' : 'were'} left as ${noCard === 1 ? 'it was' : 'they were'}; use Straighten & crop to do ${noCard === 1 ? 'it' : 'them'} by hand.` : ''}` });
   }
 
   // ---------- photo edits: straighten & crop, undo, order, remove (server keeps the originals) ----------
@@ -194,6 +210,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
   const photoHandlers = (it) => ({
     onOrder: (paths) => photoCall(it, { action: 'order', paths }, 'Saving…'),
     onAuto: (path) => photoCall(it, { action: 'autocrop', path }, 'Straightening…'),
+    onAutoAll: (paths) => autoFixPhotos(it, paths),
     onUndo: (path) => photoCall(it, { action: 'undo', path }, 'Undoing…'),
     onEdit: (path) => setEditing({ id: it.id, path }),
   });
