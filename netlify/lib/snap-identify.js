@@ -6,6 +6,7 @@ import { lookupCard } from './card-catalog.js';
 import { ebayMedianFor } from './market.js';
 import { applyIdentification, scoreTrial, titleNumber, SNAP_DEFAULTS } from './snap-logic.js';
 import { usageRow, logUsage, checkBudget, costOf } from './ai-usage.js';
+import { autoCropOnSnap } from './snap-photos.js';
 
 export async function loadSnapSettings(db, userId) {
   const { data } = await db.from('settings').select('data').eq('user_id', userId).maybeSingle();
@@ -70,7 +71,10 @@ export async function identifySnapItem({ db, userId, item, deps = {} }) {
     const patch = { ...applyIdentification({ read: r.read, catalog, settings, duplicateItemId, ebayMedian }), model, identified_at: new Date().toISOString() };
     const { error: upErr } = await db.from('snap_items').update(patch).eq('id', item.id).eq('user_id', userId);
     if (upErr) throw new Error(upErr.message);
-    return { item: { ...item, ...patch }, cost: r.cost, budget };
+    // Straighten and crop the photo so the card fills it, from the corners the same read found.
+    const identified = { ...item, ...patch };
+    const cropped = await (deps.autoCropOnSnap || autoCropOnSnap)({ db, userId, item: identified, read: r.read, settings });
+    return { item: cropped || identified, cost: r.cost, budget };
   } catch (err) {
     await db.from('snap_items').update({ status: 'failed', error: String(err.message).slice(0, 300) }).eq('id', item.id).eq('user_id', userId);
     throw err;

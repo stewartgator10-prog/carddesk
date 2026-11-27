@@ -3,11 +3,17 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
   const t = (name) => (tables[name] ||= []);
   return {
     tables,
+    files,
     storage: {
       from: () => ({
         download: async (path) => (files[path]
           ? { data: new Blob([files[path]], { type: 'image/jpeg' }), error: null }
           : { data: null, error: { message: 'Object not found' } }),
+        upload: async (path, body) => {
+          if (files[path]) return { data: null, error: { message: 'The resource already exists' } };
+          files[path] = Buffer.from(body); return { data: { path }, error: null };
+        },
+        remove: async (paths) => { paths.forEach((p) => delete files[p]); return { data: paths, error: null }; },
       }),
     },
     from(name) {

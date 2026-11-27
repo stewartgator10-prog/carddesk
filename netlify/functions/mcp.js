@@ -39,7 +39,7 @@ const EDIT = { readOnlyHint: false, destructiveHint: false, idempotentHint: true
 
 export function buildServer(ctx) {
   const server = new McpServer({ name: 'carddesk', version: '1.0.0' }, {
-    instructions: 'CardDesk is a trading card seller\'s workspace. Cards are photographed in the CardDesk Snap tab on a phone, identified by AI, then reviewed, approved, checked with eBay and published. Prices are USD. Always show the user what you are about to change on eBay and get a clear yes before publish_cards. The seller also keeps a personal collection (collection_summary, list_collection, update_collection): cards held, valued nightly, with alerts when a card is ready to review for listing; send_collection_to_listing moves them into the Snap queue. Live eBay listings: list_listings, set_best_offer and change_listing_prices change real listings and need the user\'s explicit yes (user_confirmed=true), like publish_cards.',
+    instructions: 'CardDesk is a trading card seller\'s workspace. Cards are photographed in the CardDesk Snap tab on a phone, identified by AI, then reviewed, approved, checked with eBay and published. Prices are USD. Always show the user what you are about to change on eBay and get a clear yes before publish_cards. The seller also keeps a personal collection (collection_summary, list_collection, update_collection): cards held, valued nightly, with alerts when a card is ready to review for listing; send_collection_to_listing moves them into the Snap queue. Live eBay listings: list_listings, set_best_offer and change_listing_prices change real listings and need the user\'s explicit yes (user_confirmed=true), like publish_cards. Photos: edit_card_photos straightens and crops a card\'s photos so the card fills them, reorders or removes them, and (with the user\'s yes) sends them to a card already live on eBay.',
   });
   const run = (name, fn) => async (args) => {
     console.info('mcp tool', name, ctx.userId);
@@ -173,6 +173,18 @@ export function buildServer(ctx) {
       confirm_large_changes: z.boolean().optional(),
     }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, run('change_listing_prices', (c, a) => tools.changeListingPrices(c, a)));
+
+  server.registerTool('edit_card_photos', {
+    title: 'Edit a card\'s listing photos',
+    description: 'A snapped card\'s eBay photos (photo_number is 1-based, 1 = main photo). auto_fix: the AI straightens and crops the photo (or every unedited photo when photo_number is left out) so the card fills it with white outside its corners, about a cent each; the card itself is never retouched and the original is kept. undo: put photo_number\'s original back. set_order: order = photo numbers in the new order, main first; photos left out are removed. update_ebay: for a card already live on eBay, replace the listing\'s photos with the current ones; changes the LIVE listing, so tell the user and get an explicit yes first, then pass user_confirmed=true.',
+    inputSchema: {
+      id: z.string().describe('Card id from list_cards'),
+      action: z.enum(['auto_fix', 'undo', 'set_order', 'update_ebay']),
+      photo_number: z.number().int().min(1).max(12).optional(),
+      order: z.array(z.number().int().min(1).max(12)).max(12).optional(),
+      user_confirmed: z.boolean().optional().describe('update_ebay only: true after the user explicitly approved'),
+    }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, run('edit_card_photos', (c, a) => tools.editPhotos(c, a)));
 
   server.registerTool('ai_fee_report', {
     title: 'AI fee report',

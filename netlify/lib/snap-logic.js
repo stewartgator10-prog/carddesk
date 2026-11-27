@@ -15,6 +15,7 @@ export const SNAP_DEFAULTS = {
   snapBestOffer: true,
   snapBestOfferPct: 10,
   snapPromotePct: 2,
+  snapAutoCrop: true,          // straighten and crop each snap so the card fills the photo (the original is kept)
   snapPackageWeightOz: 3,
   snapPackageLengthIn: 9,
   snapPackageWidthIn: 6,

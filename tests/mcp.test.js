@@ -44,7 +44,7 @@ test('MCP protocol: initialize, list tools with safety hints, call a tool', asyn
 
   const list = await (await handleMcp(rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }), { authenticate, db })).json();
   const byName = Object.fromEntries(list.result.tools.map((t) => [t.name, t]));
-  assert.deepEqual(Object.keys(byName).sort(), ['ai_fee_report', 'approve_cards', 'change_listing_prices', 'check_cards', 'collection_summary', 'discard_cards', 'list_cards', 'list_collection',
+  assert.deepEqual(Object.keys(byName).sort(), ['ai_fee_report', 'approve_cards', 'change_listing_prices', 'check_cards', 'collection_summary', 'discard_cards', 'edit_card_photos', 'list_cards', 'list_collection',
     'list_listings', 'profit_report', 'publish_cards', 'queue_summary', 'reprice_cards', 'send_collection_to_listing', 'set_best_offer', 'update_cards', 'update_collection']);
   for (const live of ['set_best_offer', 'change_listing_prices']) {
     assert.equal(byName[live].annotations.openWorldHint, true);

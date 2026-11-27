@@ -8,6 +8,10 @@ import { z } from 'zod';
 export const SNAP_MODELS = ['claude-opus-5-5', 'claude-haiku-5-5'];
 export const DEFAULT_SNAP_MODEL = 'claude-opus-5-5';
 
+// The card's four corners as fractions of the photo (0 = left/top edge, 1 = right/bottom edge).
+const Pt = z.object({ x: z.number(), y: z.number() });
+export const Corners = z.object({ tl: Pt, tr: Pt, br: Pt, bl: Pt });
+
 export const CardRead = z.object({
   is_trading_card: z.boolean(),
   game: z.enum(['pokemon', 'mtg', 'one_piece', 'lorcana', 'yugioh', 'sports', 'other']),
@@ -31,7 +35,10 @@ export const CardRead = z.object({
   misprint_notes: z.string().nullable(),
   confidence: z.number(),
   notes: z.string().nullable(),
+  card_corners: Corners.nullable(),
 });
+
+const CORNERS_RULE = `- card_corners: where the card's four corners are in the photo, as fractions of the photo's width (x) and height (y), 0 to 1, measured from the top-left of the photo as you see it: tl, tr, br, bl are the card's own top-left, top-right, bottom-right and bottom-left as the card is printed (if the card is upside down or sideways in the photo, tl is still the corner at the top-left of the card's artwork). For a rounded corner, give the point where the two straight edges would meet. For a card in a grading slab, give the corners of the slab's outer edge. Be as exact as you can. Null if any corner is outside the photo or hidden.`;
 
 export const SYSTEM_PROMPT = `You identify trading cards from photos for a card seller who lists them on eBay.
 Report only what you can read or clearly see. Never invent a value: use null when it isn't visible.
@@ -55,7 +62,8 @@ Report only what you can read or clearly see. Never invent a value: use null whe
 - condition_guess: only from visible wear; "unknown" if the photo can't show the edges and surface.
 - possible_misprint: true only for visible evidence such as texture shift, print grid lines, a crimp, ink smear or missing ink, a miscut, or heavy off-centering. Describe what you see in misprint_notes. Do not flag ordinary holo patterns or photo glare.
 - confidence: from 0 to 1, how sure you are that card_name and collector_number are both right.
-- notes: anything a seller should check by hand, otherwise null.`;
+- notes: anything a seller should check by hand, otherwise null.
+${CORNERS_RULE}`;
 
 let client = null;
 export function getClient() {
@@ -108,20 +116,30 @@ export function parseCardRead(msg, schema = CardRead) {
 // image: { base64, mediaType }. Returns { read, usage, servedModel, requestId, latencyMs }.
 // Throws an Error carrying .usage/.requestId when a response came back but couldn't be used,
 // so the caller can still log what it cost.
-export async function readCard({ model, image, anthropic = null }) {
+export async function readCard({ model, image, anthropic = null, schema = CardRead, system = SYSTEM_PROMPT, prompt = 'Identify this card.' }) {
   if (!SNAP_MODELS.includes(model)) throw new Error(`Unsupported model ${model}`);
   const api = anthropic || getClient();
   const t0 = Date.now();
   // create().withResponse() (not parse()) so the request id survives for the fee log.
-  const { data: msg, request_id } = await api.beta.messages.create(buildRequest(model, image)).withResponse();
+  const { data: msg, request_id } = await api.beta.messages.create(buildRequest(model, image, { schema, system, prompt })).withResponse();
   const latencyMs = Date.now() - t0;
   const base = { usage: msg.usage, servedModel: msg.model || model, requestId: request_id, latencyMs };
   if (msg.stop_reason === 'refusal') throw Object.assign(new Error('Claude declined to read this photo.'), base);
   if (msg.stop_reason === 'max_tokens') throw Object.assign(new Error('Claude ran out of room before finishing.'), base);
-  const read = parseCardRead(msg);
+  const read = parseCardRead(msg, schema);
   if (!read) throw Object.assign(new Error('Claude returned an unreadable answer.'), base);
   return { read, ...base };
 }
+
+// Just the corners, for photos added after the snap (the back, a second angle).
+export const CornersRead = z.object({ card_found: z.boolean(), graded: z.boolean(), card_corners: Corners.nullable() });
+export const CORNERS_PROMPT = `You find a trading card in a photo so it can be straightened and cropped for an eBay listing.
+- card_found: true only if one whole card (front or back) is in the photo with all four corners visible. False for close-ups of part of a card, several cards, or no card.
+- graded: true if the card is inside a grading slab.
+${CORNERS_RULE.replace('For a card in a grading slab', 'For a slab')}
+  For the back of a card, tl is whichever corner is at the top-left when the card is upright.`;
+export const readCorners = ({ model, image, anthropic = null }) =>
+  readCard({ model, image, anthropic, schema: CornersRead, system: CORNERS_PROMPT, prompt: 'Find the card\'s corners.' });
 
 // Downloads an image (eBay listing photo) and returns { base64, mediaType }.
 export async function fetchImage(url, fetchImpl = fetch) {
@@ -135,12 +153,12 @@ export async function fetchImage(url, fetchImpl = fetch) {
 }
 
 // ---------- several cards in one photo (binder page or a spread), for buy offers ----------
-export const PAGE_PROMPT = `${SYSTEM_PROMPT}
+export const PAGE_PROMPT = `${SYSTEM_PROMPT.replace(`\n${CORNERS_RULE}`, '')}
 
 This photo may show several cards: a binder page or cards laid out on a table. Return every trading card you can see, at most 9, in reading order (left to right, then top to bottom) with position starting at 1. For each card give box: where the card is in the photo as fractions of the photo's width and height (x, y = top-left corner; w, h = width and height), each between 0 and 1. If a card's small print can't be read, still return it with your best name and a low confidence.`;
 
 export const PageRead = z.object({
-  cards: z.array(CardRead.extend({
+  cards: z.array(CardRead.omit({ card_corners: true }).extend({
     position: z.number().int(),
     box: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
   })),

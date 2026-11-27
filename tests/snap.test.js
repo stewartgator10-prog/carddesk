@@ -15,7 +15,7 @@ const U = 'u1';
 const read = (over = {}) => ({
   is_trading_card: true, game: 'pokemon', card_name: 'Fuecoco', collector_number: '035/193', set_name: null, set_code: null,
   language: 'English', finish: 'reverse_holo', variant: null, rarity: null, game_name: null, art_description: null, flavor_text: null, condition_notes: null, grader: null, grade: null, graded: false, condition_guess: 'unknown',
-  possible_misprint: false, misprint_notes: null, confidence: 0.95, notes: null, ...over,
+  possible_misprint: false, misprint_notes: null, confidence: 0.95, notes: null, card_corners: null, ...over,
 });
 const catalog = (over = {}) => ({ source: 'tcgdex', id: 'sv02-035', name: 'Fuecoco', setName: 'Paldea Evolved', number: '035/193', imageUrl: 'x', url: 'y', marketPrice: 0.27, priceKey: 'reverse-holofoil', matchLevel: 'exact', ...over });
 

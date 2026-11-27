@@ -7,6 +7,7 @@ import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAU
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
 import { askConfirm, askValue } from './lib/dialog.jsx';
+import { PhotoStrip, PhotoEditor } from './PhotoEditor.jsx';
 
 const money = (n, d = 2) => (n == null || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(d)}`);
 const fee = (n) => (n == null ? '—' : Number(n) < 0.01 ? `$${Number(n).toFixed(4)}` : `$${Number(n).toFixed(2)}`);
@@ -14,7 +15,7 @@ const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const OPEN = ['uploaded', 'identifying', 'ready', 'needs_review', 'failed', 'approved', 'listed'];
 const DONE = ['approved', 'listed'];
 // Editing any of these after the eBay check means the check no longer describes the listing.
-const LISTING_FIELDS = ['title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction', 'description'];
+const LISTING_FIELDS = ['photo_path', 'title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction', 'description'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 const STATUS = {
@@ -171,12 +172,37 @@ export default function SnapTab({ userId, settings, setSettings }) {
         added.push(path);
       }
     } catch (e) { setMsg({ type: 'error', text: `Photo failed: ${e.message}` }); }
-    if (added.length) await save(item.id, { extra_photo_paths: [...extrasOf(item), ...added], ebay_picture_urls: null });
+    if (added.length) await save(item.id, { extra_photo_paths: [...extrasOf(item), ...added], back_photo_path: null, ebay_picture_urls: null });
     if (files.length > room) setMsg({ type: 'error', text: `Added ${added.length} of ${files.length}: a listing can have up to ${MAX_LISTING_PHOTOS} photos.` });
+    // Straighten the new photos too. Close-ups with no whole card in them are simply left as they are.
+    if (s.snapAutoCrop !== false) for (const path of added) await photoCall(item, { action: 'autocrop', path }, 'Straightening…', { quiet: true });
   }
-  async function removeExtraPhoto(item, path) {
-    await save(item.id, { extra_photo_paths: extrasOf(item).filter((p) => p !== path), back_photo_path: null, ebay_picture_urls: null });
-    supabase.storage.from('snap-photos').remove([path]).catch(() => {}); // tidy up; the listing no longer points at it either way
+
+  // ---------- photo edits: straighten & crop, undo, order, remove (server keeps the originals) ----------
+  const [photoBusy, setPhotoBusy] = useState({});   // card id -> what's happening
+  const [editing, setEditing] = useState(null);      // { id, path }
+  async function photoCall(item, body, label, { quiet = false, raise = false } = {}) {
+    setPhotoBusy((b) => ({ ...b, [item.id]: label }));
+    const r = await postJson('/api/snap-photos', { id: item.id, ...body }).catch((e) => ({ ok: false, data: { error: e.message } }));
+    setPhotoBusy((b) => { const n = { ...b }; delete n[item.id]; return n; });
+    if (r.ok) { patchLocal(item.id, r.data.item); if (body.action === 'autocrop') loadUsage(); return r.data.item; }
+    const text = r.data.error || `Photo change failed (${r.status})`;
+    if (raise) throw new Error(text);
+    if (!(quiet && r.status === 422)) setMsg({ type: 'error', text });
+    return null;
+  }
+  const photoHandlers = (it) => ({
+    onOrder: (paths) => photoCall(it, { action: 'order', paths }, 'Saving…'),
+    onAuto: (path) => photoCall(it, { action: 'autocrop', path }, 'Straightening…'),
+    onUndo: (path) => photoCall(it, { action: 'undo', path }, 'Undoing…'),
+    onEdit: (path) => setEditing({ id: it.id, path }),
+  });
+  async function sendPhotosToEbay(item) {
+    const n = listingPhotoPaths(item).length;
+    if (!(await askConfirm(`Replace the photos on your live eBay listing #${item.ebay_item_id} with these ${n} photo${n === 1 ? '' : 's'}?\n\nBuyers see the new photos right away. Price, title and everything else stay the same.`,
+      { title: 'Update photos on eBay', confirmLabel: 'Update photos on eBay' }))) return;
+    const done = await photoCall(item, { action: 'update_ebay' }, 'Sending to eBay…');
+    if (done) setMsg({ type: 'ok', text: `Photos updated on eBay listing #${item.ebay_item_id}.` });
   }
 
   // Cards from a buy-offer binder page start with only part of the page photo; this swaps in a real one.
@@ -322,7 +348,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} extras={listingPhotoPaths(it).filter((p) => p !== it.photo_path).map((p) => ({ path: p, url: photoUrls[p] }))} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onRemovePhoto={(p) => removeExtraPhoto(it, p)} onReplace={(f) => replacePhoto(it, f)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} photoUrls={photoUrls} photoBusy={photoBusy[it.id]} photo_={photoHandlers(it)} onSendPhotos={() => sendPhotosToEbay(it)} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onReplace={(f) => replacePhoto(it, f)} />)}
             </div>
           )}
           <div className="ink-faint" style={{ fontSize: '0.7rem' }}>
@@ -331,6 +357,14 @@ export default function SnapTab({ userId, settings, setSettings }) {
         </>
       )}
 
+      {editing && (() => {
+        const it = items.find((x) => x.id === editing.id);
+        if (!it || !listingPhotoPaths(it).includes(editing.path)) return null;
+        return <PhotoEditor key={editing.path} it={it} path={editing.path} onClose={() => setEditing(null)}
+          onApply={(path, corners) => photoCall(it, { action: 'crop', path, corners }, 'Straightening…', { raise: true })}
+          onAuto={(path) => photoCall(it, { action: 'autocrop', path }, 'Straightening…', { raise: true })} />;
+      })()}
+
       {panel === 'fees' && <FeePanel usage={usage} budget={budget} onReload={loadUsage} />}
       {panel === 'trial' && <TrialPanel settings={s} setSettings={setSettings} onUsage={loadUsage} />}
       {panel === 'settings' && <SnapSettings s={s} settings={settings} setSettings={setSettings} />}
@@ -338,8 +372,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
   );
 }
 
-function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetry, onAddPhotos, onRemovePhoto, onReplace }) {
-  const moreInput = useRef(null);
+function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, onSendPhotos, onSave, onApprove, onDiscard, onRetry, onAddPhotos, onReplace }) {
   const frontInput = useRef(null);
   const [d, setD] = useState(it);
   useEffect(() => { setD(it); }, [it]);
@@ -376,23 +409,12 @@ function SnapCard({ it, photo, extras = [], onSave, onApprove, onDiscard, onRetr
       )}
 
       {!busy && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.7rem' }}>
-          <input ref={moreInput} type="file" accept="image/*" multiple aria-label="Add photos to this listing" style={{ display: 'none' }} onChange={(e) => { if (e.target.files.length) onAddPhotos(e.target.files); e.target.value = ''; }} />
-          {extras.map((x, i) => (
-            <div key={x.path} style={{ position: 'relative', width: 40, height: 56, background: 'var(--well)', borderRadius: 6, flex: 'none' }}>
-              {x.url ? <img src={x.url} alt={`Extra photo ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : null}
-              {it.status !== 'listed' && (
-                <button onClick={() => onRemovePhoto(x.path)} title="Remove this photo" aria-label={`Remove extra photo ${i + 1}`}
-                  style={{ position: 'absolute', top: -7, right: -7, width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--line-strong)', background: 'var(--paper)', color: 'var(--ink)', cursor: 'pointer', padding: 0, display: 'grid', placeItems: 'center' }}><X size={11} /></button>
-              )}
-            </div>
-          ))}
-          {it.status !== 'listed' && extras.length + 1 < MAX_LISTING_PHOTOS && (
-            <button className="btn-ghost" onClick={() => moreInput.current?.click()} style={{ padding: '4px 8px', fontSize: '0.7rem', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-              <Camera size={12} /> Add photos
-            </button>
-          )}
-          <span className="ink-faint">{extras.length ? `${extras.length + 1} photos go on eBay, main photo first` : 'Back, corners, close-ups (optional)'}</span>
+        <PhotoStrip it={it} paths={listingPhotoPaths(it)} urls={photoUrls} max={MAX_LISTING_PHOTOS} busy={photoBusy} locked={false} onAdd={onAddPhotos} {...photo_} />
+      )}
+      {it.status === 'listed' && !(it.ebay_picture_urls || []).length && (
+        <div role="status" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.75rem', padding: 8, border: '1px dashed var(--warn)' }}>
+          <span className="accent-amber" style={{ flex: 1, minWidth: 160 }}>These photos aren't on eBay yet. The live listing still shows the old ones.</span>
+          <button className="btn-primary" disabled={!!photoBusy} onClick={onSendPhotos} style={{ padding: '6px 12px', fontSize: '0.75rem' }}>Update photos on eBay</button>
         </div>
       )}
 
@@ -847,6 +869,12 @@ function ListingSetup({ s, set }) {
           {err && <div className="accent-red" style={{ fontSize: '0.75rem' }}>{err}</div>}
         </>
       )}
+      <div style={{ display: 'grid', gap: 4 }}>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', margin: 0, fontSize: '0.8rem', textTransform: 'none', letterSpacing: 0, color: 'var(--ink)' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={s.snapAutoCrop !== false} onChange={(e) => set('snapAutoCrop', e.target.checked)} /> Straighten &amp; crop photos automatically
+        </label>
+        <div className="ink-faint" style={{ fontSize: '0.7rem' }}>Each snap is straightened and cropped so the card fills the photo, with white outside its corners. Uses the corners the AI already found while reading the card (no extra cost on snaps; about a cent for each photo you add later). The card itself is never retouched, the original is kept, and "Undo edit" on any photo puts it back.</div>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: 10, alignItems: 'end' }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', margin: 0, fontSize: '0.8rem', textTransform: 'none', letterSpacing: 0, color: 'var(--ink)' }}>
           <input type="checkbox" style={{ width: 'auto' }} checked={s.snapBestOffer !== false} onChange={(e) => set('snapBestOffer', e.target.checked)} /> Best Offer on new listings
