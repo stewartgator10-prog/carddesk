@@ -44,7 +44,13 @@ test('MCP protocol: initialize, list tools with safety hints, call a tool', asyn
 
   const list = await (await handleMcp(rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }), { authenticate, db })).json();
   const byName = Object.fromEntries(list.result.tools.map((t) => [t.name, t]));
-  assert.deepEqual(Object.keys(byName).sort(), ['ai_fee_report', 'approve_cards', 'check_cards', 'discard_cards', 'list_cards', 'profit_report', 'publish_cards', 'queue_summary', 'reprice_cards', 'update_cards']);
+  assert.deepEqual(Object.keys(byName).sort(), ['ai_fee_report', 'approve_cards', 'change_listing_prices', 'check_cards', 'collection_summary', 'discard_cards', 'list_cards', 'list_collection',
+    'list_listings', 'profit_report', 'publish_cards', 'queue_summary', 'reprice_cards', 'send_collection_to_listing', 'set_best_offer', 'update_cards', 'update_collection']);
+  for (const live of ['set_best_offer', 'change_listing_prices']) {
+    assert.equal(byName[live].annotations.openWorldHint, true);
+    assert.ok(byName[live].inputSchema.required.includes('user_confirmed'));
+  }
+  assert.equal(byName.list_collection.annotations.readOnlyHint, true);
   assert.equal(byName.list_cards.annotations.readOnlyHint, true);
   assert.equal(byName.discard_cards.annotations.destructiveHint, true);
   assert.equal(byName.publish_cards.annotations.openWorldHint, true);
@@ -127,4 +133,80 @@ test('profit report counts only matched sales with a cost, and lists the rest', 
   assert.equal(r.profit_after_store_costs, 20);
   assert.equal(r.sales_missing_cost, 1);
   assert.equal(r.best_sales[0].title, 'Lugia V');
+});
+
+test('access keys: shown once, stored only as a hash, accepted by the connector, revocable, and tied to the allowed list', async () => {
+  const { createKey, listKeys, revokeKey, userFromKey } = await import('../netlify/lib/access-keys.js');
+  const db = fakeDb({ access_keys: [] });
+  const k = await createKey({ db, user: { id: U, email: 'jackson@example.com' }, name: 'Muse' });
+  assert.match(k.key, /^cdk_[A-Za-z0-9_-]{32}$/);
+  const row = db.tables.access_keys[0];
+  assert.equal(row.key_hash.length, 64);
+  assert.ok(!JSON.stringify(row).includes(k.key));                              // the key itself is never stored
+  assert.deepEqual((await listKeys({ db, userId: U })).map((x) => [x.name, x.prefix]), [['Muse', k.key.slice(0, 10)]]);
+  assert.equal((await listKeys({ db, userId: U }))[0].key, undefined);
+  const who = await userFromKey({ db, key: k.key, allowedEmails: '' });
+  assert.deepEqual([who.id, who.via], [U, 'access_key']);
+  assert.ok(db.tables.access_keys[0].last_used_at);
+  assert.equal(await userFromKey({ db, key: k.key, allowedEmails: 'someone@else.com' }), null);   // owner no longer allowed
+  assert.equal(await userFromKey({ db, key: 'cdk_wrongwrongwrongwrongwrongwrongwrong', allowedEmails: '' }), null);
+  await revokeKey({ db, userId: U, id: k.id });
+  assert.equal(await userFromKey({ db, key: k.key, allowedEmails: '' }), null);
+  await assert.rejects(revokeKey({ db, userId: 'other', id: k.id }), /not found/);
+});
+
+test('connector tools: collection, Best Offer and prices; live eBay changes need the user\'s yes', async () => {
+  const tools = await import('../netlify/lib/mcp-tools.js');
+  const db = fakeDb({
+    settings: [{ user_id: U, data: { collectionAlertPct: 25 } }], snap_items: [], collection_prices: [], price_changes: [], listing_market: [{ user_id: U, item_id: '1', market_price: 2.5, comp_low: 2.1 }],
+    collection_items: [
+      { id: 'c1', user_id: U, status: 'held', alert_state: 'none', card_name: 'Charizard ex', game: 'pokemon', market_price: 120, value_at_add: 100, quantity: 1, flags: [], condition: 'NM' },
+      { id: 'c2', user_id: U, status: 'held', alert_state: 'active', alert_reason: 'Up 40%', card_name: 'Pidgeot ex', game: 'pokemon', market_price: 14, value_at_add: 10, cost: 9, quantity: 2, flags: [], condition: 'NM' },
+    ],
+    ebay_listings: [
+      { user_id: U, item_id: '1', title: 'Fuecoco 035/193 | Pokemon', price: 1.89, status: 'Active', listing_type: 'FixedPriceItem', best_offer: true },
+      { user_id: U, item_id: '2', title: 'Auction card', price: 5, status: 'Active', listing_type: 'Chinese' },
+    ],
+  });
+  const ctx = { db, userId: U, settings: { snapBestOfferPct: 10 }, getToken: async () => 'tok', deps: {} };
+
+  const sum = await tools.collectionSummary(ctx);
+  assert.deepEqual([sum.cards_held, sum.value, sum.paid, sum.ready_to_review.map((r) => r.name)], [3, 148, 18, ['Pidgeot ex']]);
+  assert.equal((await tools.listCollection(ctx, { filter: 'alerts' })).items[0].change_pct, 55.56);   // from cost 9 to 14
+  const up = await tools.updateCollection(ctx, { updates: [{ id: 'c1', target_price: 110 }, { id: 'c2', dismiss_alert: true }, { id: 'nope', cost: 1 }] });
+  assert.deepEqual([up.updated, up.ready_to_review_now], [2, 1]);                                   // Charizard now over its target; Pidgeot dismissed
+  await assert.rejects(tools.updateCollection(ctx, { updates: [{ id: 'c1', quantity: 0 }] }).then((r) => { if (!r.results[0].ok) throw new Error(r.results[0].error); }), /quantity/);
+
+  const listed = await tools.listListings(ctx, {});
+  assert.deepEqual(listed.listings.map((l) => [l.item_id, l.best_offer, l.tcgplayer_market]), [['2', 'unknown', null], ['1', true, 2.5]]);
+
+  await assert.rejects(tools.setListingsBestOffer(ctx, { item_ids: ['1'], enabled: false }), /get a clear yes/);
+  const sent = [];
+  const bo = await tools.setListingsBestOffer({ ...ctx, deps: { setBestOffer: async (_t, x) => { sent.push(x); return { accept: null }; } } }, { item_ids: ['1', '2', 'x'], enabled: false, user_confirmed: true });
+  assert.deepEqual(bo.results.map((r) => [r.item_id, r.ok]), [['1', true], ['2', false], ['x', false]]);
+  assert.deepEqual(sent, [{ itemId: '1', enabled: false, price: 1.89, pct: 10 }]);
+  assert.equal(db.tables.ebay_listings[0].best_offer, false);
+
+  await assert.rejects(tools.changeListingPrices(ctx, { changes: [{ item_id: '1', new_price: 1.79 }] }), /get a clear yes/);
+  await assert.rejects(tools.changeListingPrices(ctx, { changes: [{ item_id: '1', new_price: 0.5 }], user_confirmed: true }), /between \$0\.99/);
+  await assert.rejects(tools.changeListingPrices(ctx, { changes: [{ item_id: '1', new_price: 5 }], user_confirmed: true }), /50% or more.*confirm_large_changes=true/);
+  const pr = await tools.changeListingPrices({ ...ctx, deps: { revisePrices: async (_t, list) => list.map((c) => ({ itemId: c.itemId, ok: true, price: c.newPrice, error: null, warnings: [] })) } },
+    { changes: [{ item_id: '1', new_price: 1.79 }], user_confirmed: true });
+  assert.deepEqual([pr.changed, db.tables.ebay_listings[0].price, db.tables.price_changes[0].new_price], [1, 1.79, 1.79]);
+});
+
+test('the connector accepts an access key in Authorization or X-API-Key, and refuses a revoked one', async () => {
+  const { createKey, revokeKey } = await import('../netlify/lib/access-keys.js');
+  const db = fakeDb({ access_keys: [], snap_items: [], settings: [], api_usage: [], ebay_accounts: [], collection_items: [] });
+  const k = await createKey({ db, user: { id: U, email: 'jackson@example.com' }, name: 'Muse' });
+  const call = (headers) => handleMcp(new Request('https://site.test/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'collection_summary', arguments: {} } }) }), { db });
+  const viaBearer = await (await call({ authorization: `Bearer ${k.key}` })).json();
+  assert.match(viaBearer.result.content[0].text, /"cards_held": 0/);
+  const viaHeader = await call({ 'x-api-key': k.key });
+  assert.equal(viaHeader.status, 200);
+  await revokeKey({ db, userId: U, id: k.id });
+  const refused = await call({ authorization: `Bearer ${k.key}` });
+  assert.equal(refused.status, 401);
+  assert.match((await refused.json()).error, /not valid or was revoked/);
 });

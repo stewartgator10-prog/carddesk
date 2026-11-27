@@ -3,6 +3,8 @@
 // Sign-in: Supabase Auth's OAuth 2.1 server. A request without a valid CardDesk token gets a 401
 // pointing at /.well-known/oauth-protected-resource, which names Supabase as the authorization
 // server; Claude then runs the "Sign in with CardDesk" flow (consent page: /oauth/consent).
+// AI apps that can't run that flow (Muse, Grok...) can use a personal access key instead, created in
+// Snap to List → Settings and sent as "Authorization: Bearer cdk_..." or an "X-API-Key" header.
 // Stateless: a fresh server + transport per request, JSON responses only.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
@@ -11,6 +13,7 @@ import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, getSellerAccessToken } from '../lib/ebay-seller.js';
 import { loadSnapSettings } from '../lib/snap-identify.js';
 import * as tools from '../lib/mcp-tools.js';
+import { userFromKey, looksLikeKey } from '../lib/access-keys.js';
 
 const metadataUrl = (origin) => `${origin}/.well-known/oauth-protected-resource`;
 const unauthorized = (origin, message = 'Sign in to CardDesk to use this connector.') => new Response(JSON.stringify({ error: message }), {
@@ -18,7 +21,13 @@ const unauthorized = (origin, message = 'Sign in to CardDesk to use this connect
   headers: { 'Content-Type': 'application/json', 'WWW-Authenticate': `Bearer resource_metadata="${metadataUrl(origin)}"` },
 });
 
-async function defaultAuthenticate(req, origin) {
+async function defaultAuthenticate(req, origin, db = null) {
+  const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  const key = looksLikeKey(bearer) ? bearer : (req.headers.get('x-api-key') || '').trim();
+  if (looksLikeKey(key)) {
+    const user = await userFromKey({ db: db || getSupabaseAdmin(), key });
+    return user ? { user } : { response: unauthorized(origin, 'That CardDesk access key is not valid or was revoked. Create a new one in Snap to List → Settings.') };
+  }
   if (!/^Bearer\s+\S+/i.test(req.headers.get('authorization') || '')) return { response: unauthorized(origin) };
   const auth = await requireUser(req);
   if (auth instanceof Response) return { response: auth.status === 401 ? unauthorized(origin, 'Your CardDesk sign-in expired. Reconnect the connector.') : auth };
@@ -30,7 +39,7 @@ const EDIT = { readOnlyHint: false, destructiveHint: false, idempotentHint: true
 
 export function buildServer(ctx) {
   const server = new McpServer({ name: 'carddesk', version: '1.0.0' }, {
-    instructions: 'CardDesk is a trading card seller\'s workspace. Cards are photographed in the CardDesk Snap tab on a phone, identified by AI, then reviewed, approved, checked with eBay and published. Prices are USD. Always show the user what you are about to change on eBay and get a clear yes before publish_cards.',
+    instructions: 'CardDesk is a trading card seller\'s workspace. Cards are photographed in the CardDesk Snap tab on a phone, identified by AI, then reviewed, approved, checked with eBay and published. Prices are USD. Always show the user what you are about to change on eBay and get a clear yes before publish_cards. The seller also keeps a personal collection (collection_summary, list_collection, update_collection): cards held, valued nightly, with alerts when a card is ready to review for listing; send_collection_to_listing moves them into the Snap queue. Live eBay listings: list_listings, set_best_offer and change_listing_prices change real listings and need the user\'s explicit yes (user_confirmed=true), like publish_cards.',
   });
   const run = (name, fn) => async (args) => {
     console.info('mcp tool', name, ctx.userId);
@@ -110,6 +119,61 @@ export function buildServer(ctx) {
     inputSchema: { days: z.number().int().min(1).max(3650).optional() }, annotations: READ,
   }, run('profit_report', (c, a) => tools.profitReport(c, a)));
 
+  server.registerTool('collection_summary', {
+    title: 'Collection summary',
+    description: 'The seller\'s personal collection (cards held, not for sale): total value, value when added, what was paid, the default alert %, and every card that is ready to review for listing because it hit its target price or growth %. Read-only.',
+    inputSchema: {}, annotations: READ,
+  }, run('collection_summary', (c) => tools.collectionSummary(c)));
+
+  server.registerTool('list_collection', {
+    title: 'List collection cards',
+    description: 'Collection cards with value per card, source, value when added, cost, change %, targets and any alert. filter: "held" (default), "alerts" (ready to review), "listing" (sent to Snap to List), "all". Sorted by total value. Read-only.',
+    inputSchema: {
+      filter: z.enum(['held', 'alerts', 'listing', 'all']).optional(), search: z.string().optional().describe('Matches name, set or number'),
+      limit: z.number().int().min(1).max(200).optional().describe('Default 50'),
+    }, annotations: READ,
+  }, run('list_collection', (c, a) => tools.listCollection(c, a)));
+
+  server.registerTool('update_collection', {
+    title: 'Edit collection cards',
+    description: 'Per card: cost (what was paid, each; null clears), target_price (alert at or above, each; null clears), target_pct (growth % alert; null uses the default), quantity, dismiss_alert. Alerts are re-checked afterwards. Nothing on eBay changes.',
+    inputSchema: {
+      updates: z.array(z.object({
+        id: z.string(), cost: z.number().nullable().optional(), target_price: z.number().nullable().optional(),
+        target_pct: z.number().nullable().optional(), quantity: z.number().int().optional(), dismiss_alert: z.boolean().optional(),
+      })).min(1).max(100),
+    }, annotations: EDIT,
+  }, run('update_collection', (c, a) => tools.updateCollection(c, a)));
+
+  server.registerTool('send_collection_to_listing', {
+    title: 'Send collection cards to Snap to List',
+    description: 'Moves collection cards into the Snap to List queue, identified and priced, with their cost, so they can be approved, checked and published. Nothing is listed on eBay by this. Use when the user wants to sell them (often cards that are ready to review). At most 25 per call.',
+    inputSchema: { ids: z.array(z.string()).min(1).max(25) }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, run('send_collection_to_listing', (c, a) => tools.sendCollectionToListing(c, a)));
+
+  server.registerTool('list_listings', {
+    title: 'List live eBay listings',
+    description: 'The seller\'s active eBay listings: item_id, title, price, Buy It Now or auction, Best Offer on/off/unknown, TCGplayer market price and the cheapest competing eBay listing when known. Read-only.',
+    inputSchema: { search: z.string().optional().describe('Matches the title'), limit: z.number().int().min(1).max(200).optional().describe('Default 50') }, annotations: READ,
+  }, run('list_listings', (c, a) => tools.listListings(c, a)));
+
+  server.registerTool('set_best_offer', {
+    title: 'Turn Best Offer on or off',
+    description: 'Changes LIVE eBay listings. enabled=false removes Best Offer (and its auto-accept/decline amounts) so any price can be set; enabled=true turns it on, auto-accepting offers at 90% of the price and up (the seller\'s setting) and declining lower ones. Before calling: tell the user which listings change and get an explicit yes; then pass user_confirmed=true. At most 25 per call.',
+    inputSchema: { item_ids: z.array(z.string()).min(1).max(25), enabled: z.boolean(), user_confirmed: z.boolean().describe('true only after the user explicitly approved this change') },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, run('set_best_offer', (c, a) => tools.setListingsBestOffer(c, a)));
+
+  server.registerTool('change_listing_prices', {
+    title: 'Change prices on live eBay listings',
+    description: 'Changes LIVE eBay prices (0.99 to 100000 USD). Before calling: show the user each listing with its old and new price and get an explicit yes; then pass user_confirmed=true. A change of 50% or more is refused unless the user confirmed those specifically (confirm_large_changes=true). If eBay refuses a price because of Best Offer, turn Best Offer off first (set_best_offer). At most 25 per call.',
+    inputSchema: {
+      changes: z.array(z.object({ item_id: z.string(), new_price: z.number() })).min(1).max(25),
+      user_confirmed: z.boolean().describe('true only after the user explicitly approved these prices'),
+      confirm_large_changes: z.boolean().optional(),
+    }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, run('change_listing_prices', (c, a) => tools.changeListingPrices(c, a)));
+
   server.registerTool('ai_fee_report', {
     title: 'AI fee report',
     description: 'This month\'s estimated Claude API spend for card identification, by model and by use. Read-only.',
@@ -122,9 +186,9 @@ export function buildServer(ctx) {
 export async function handleMcp(req, { authenticate = defaultAuthenticate, db = null, deps = {} } = {}) {
   const origin = new URL(req.url).origin;
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { Allow: 'POST' } });
-  const auth = await authenticate(req, origin);
-  if (auth.response) return auth.response;
   const admin = db || getSupabaseAdmin();
+  const auth = await authenticate(req, origin, admin);
+  if (auth.response) return auth.response;
   const userId = auth.user.id;
   const ctx = {
     db: admin, userId, origin, deps,

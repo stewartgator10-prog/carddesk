@@ -7,6 +7,10 @@ import { buildTitle, buildDescription, suggestPrice, REVIEW_LABELS, listingPhoto
 import { checkSnapItem, publishSnapItem } from './ebay-listing.js';
 import { summarizePnl } from './pnl.js';
 import { monthStart, MODEL_LABELS } from './ai-usage.js';
+import { sendToSnap, recheckAlerts } from './collection.js';
+import { setBestOffer, revisePrices } from './trading-price.js';
+import { recordPriceChanges } from './seller-adapter.js';
+import { validateChanges, checkAgainstListings } from '../functions/seller-reprice.js';
 
 export const MAX_CHECK_PER_CALL = 6;     // each check uploads photos + calls eBay; keeps a call well under the time limit
 export const MAX_PUBLISH_PER_CALL = 10;
@@ -229,4 +233,143 @@ export async function publishCards({ db, userId, getToken, settings, deps = {} }
     }
   }
   return { published: results.filter((r) => r.listed).length, results, missing };
+}
+
+// ---------- collection ----------
+const collectionView = (it) => ({
+  id: it.id, status: it.status, name: it.card_name, game: it.game,
+  set: it.catalog_set || it.set_name || null, number: it.catalog_number || it.collector_number || null, rarity: it.rarity || null,
+  condition: it.graded ? `${it.grader || ''} ${it.grade || ''}`.trim() || 'graded' : it.condition, quantity: it.quantity || 1,
+  value_each: it.market_price != null ? Number(it.market_price) : null, value_source: it.market_source || null,
+  value_when_added: it.value_at_add != null ? Number(it.value_at_add) : null, cost_each: it.cost != null ? Number(it.cost) : null,
+  change_pct: (() => {
+    const base = it.cost != null && Number(it.cost) > 0 ? Number(it.cost) : Number(it.value_at_add);
+    return base > 0 && it.market_price != null ? round2(((Number(it.market_price) - base) / base) * 100) : null;
+  })(),
+  target_price: it.target_price != null ? Number(it.target_price) : null, target_pct: it.target_pct != null ? Number(it.target_pct) : null,
+  alert: it.alert_state === 'active' ? it.alert_reason : null, flags: it.flags || [],
+});
+
+export async function collectionSummary({ db, userId }) {
+  const rows = await must(db.from('collection_items').select('*').eq('user_id', userId));
+  const held = rows.filter((r) => r.status === 'held');
+  const sum = (f) => round2(held.reduce((t, r) => t + (f(r) ?? 0) * (r.quantity || 1), 0));
+  const settings = await must(db.from('settings').select('data').eq('user_id', userId).maybeSingle());
+  return {
+    cards_held: held.reduce((t, r) => t + (r.quantity || 1), 0),
+    value: sum((r) => (r.market_price != null ? Number(r.market_price) : null)),
+    value_when_added: sum((r) => (r.value_at_add != null ? Number(r.value_at_add) : null)),
+    paid: sum((r) => (r.cost != null ? Number(r.cost) : null)), cards_with_cost: held.filter((r) => r.cost != null).length,
+    default_alert_pct: Number(settings?.data?.collectionAlertPct ?? 25),
+    ready_to_review: held.filter((r) => r.alert_state === 'active').map(collectionView),
+    sent_to_listing: rows.filter((r) => r.status === 'listing').length,
+    note: 'Cards are added by scanning them in the CardDesk Collection tab on a phone. Values update nightly.',
+  };
+}
+
+export async function listCollection({ db, userId }, { filter = 'held', search = '', limit = 50 } = {}) {
+  let rows = await must(db.from('collection_items').select('*').eq('user_id', userId));
+  rows = rows.filter((r) => (filter === 'alerts' ? r.status === 'held' && r.alert_state === 'active' : filter === 'all' ? r.status !== 'removed' : r.status === filter));
+  if (search) { const q = String(search).toLowerCase(); rows = rows.filter((r) => `${r.card_name} ${r.catalog_set || r.set_name} ${r.collector_number}`.toLowerCase().includes(q)); }
+  rows.sort((a, b) => (Number(b.market_price) || 0) * (b.quantity || 1) - (Number(a.market_price) || 0) * (a.quantity || 1));
+  return { count: rows.length, items: rows.slice(0, Math.min(Math.max(1, limit), 200)).map(collectionView) };
+}
+
+export async function updateCollection({ db, userId }, { updates }) {
+  const ids = (updates || []).map((u) => u.id);
+  if (!ids.length) throw toolError('Give at least one update with an id from list_collection.');
+  const rows = await must(db.from('collection_items').select('*').eq('user_id', userId).in('id', ids));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const results = [];
+  const money = (v, name) => { if (v === null) return null; const n = Number(v); if (!(n >= 0 && n <= 1_000_000)) throw toolError(`${name} must be between 0 and 1,000,000, or null to clear.`); return round2(n); };
+  for (const u of updates) {
+    const item = byId.get(u.id);
+    if (!item || item.status === 'removed') { results.push({ id: u.id, ok: false, error: 'not found' }); continue; }
+    const patch = {};
+    try {
+      if (u.cost !== undefined) patch.cost = money(u.cost, 'cost');
+      if (u.target_price !== undefined) patch.target_price = money(u.target_price, 'target_price');
+      if (u.target_pct !== undefined) { if (u.target_pct !== null && !(Number(u.target_pct) > 0 && Number(u.target_pct) <= 10000)) throw toolError('target_pct must be above 0, or null to use the default.'); patch.target_pct = u.target_pct === null ? null : Number(u.target_pct); }
+      if (u.quantity !== undefined) { const q = Math.round(Number(u.quantity)); if (!(q >= 1 && q <= 10000)) throw toolError('quantity must be 1 or more.'); patch.quantity = q; }
+    } catch (e) { results.push({ id: u.id, ok: false, error: e.message }); continue; }
+    if (['cost', 'target_price', 'target_pct'].some((k) => k in patch)) patch.alert_state = 'none';   // re-evaluated below
+    if (u.dismiss_alert) patch.alert_state = 'dismissed';
+    if (Object.keys(patch).length) await must(db.from('collection_items').update(patch).eq('user_id', userId).eq('id', u.id));
+    results.push({ id: u.id, ok: true });
+  }
+  const { active } = await recheckAlerts({ db, userId });
+  return { updated: results.filter((r) => r.ok).length, results, ready_to_review_now: active };
+}
+
+export async function sendCollectionToListing({ db, userId }, { ids }) {
+  if (!Array.isArray(ids) || !ids.length) throw toolError('Give at least one id from list_collection.');
+  const results = [];
+  for (const id of ids.slice(0, 25)) {
+    try { results.push({ id, ok: true, ...(await sendToSnap({ db, userId, id })) }); } catch (e) { results.push({ id, ok: false, error: e.message }); }
+  }
+  return { sent: results.filter((r) => r.ok).length, results, note: 'Nothing is listed yet: the cards are in the Snap to List queue (list_cards). Approve, check_cards, then publish_cards with the user\'s yes.' };
+}
+
+// ---------- live eBay listings ----------
+export async function listListings({ db, userId }, { search = '', limit = 50 } = {}) {
+  let rows = await must(db.from('ebay_listings').select('item_id, title, price, listing_type, quantity_available, best_offer, view_url, start_time').eq('user_id', userId).eq('status', 'Active'));
+  if (search) { const q = String(search).toLowerCase(); rows = rows.filter((r) => String(r.title || '').toLowerCase().includes(q)); }
+  const market = await must(db.from('listing_market').select('item_id, market_price, comp_low, comp_count').eq('user_id', userId));
+  const m = new Map(market.map((x) => [x.item_id, x]));
+  rows.sort((a, b) => String(a.title).localeCompare(String(b.title)));
+  return {
+    count: rows.length,
+    listings: rows.slice(0, Math.min(Math.max(1, limit), 200)).map((r) => ({
+      item_id: r.item_id, title: r.title, price: Number(r.price), buy_it_now: !r.listing_type || r.listing_type === 'FixedPriceItem',
+      best_offer: r.best_offer ?? 'unknown', quantity: r.quantity_available, url: r.view_url,
+      tcgplayer_market: m.get(r.item_id)?.market_price != null ? Number(m.get(r.item_id).market_price) : null,
+      ebay_low_competitor: m.get(r.item_id)?.comp_low != null ? Number(m.get(r.item_id).comp_low) : null,
+    })),
+  };
+}
+
+async function ownListings(db, userId, itemIds) {
+  const rows = await must(db.from('ebay_listings').select('item_id, title, price, status, listing_type').eq('user_id', userId).in('item_id', itemIds.map(String)));
+  return new Map(rows.map((r) => [String(r.item_id), r]));
+}
+
+export async function setListingsBestOffer({ db, userId, getToken, settings, deps = {} }, { item_ids, enabled, user_confirmed }) {
+  if (user_confirmed !== true) throw toolError('This changes live eBay listings. Tell the user which listings will have Best Offer turned ' + (enabled ? 'on (offers at 90% of the price and up accepted, lower ones declined)' : 'off') + ', get a clear yes, then call again with user_confirmed=true.');
+  const ids = [...new Set((item_ids || []).map(String))].slice(0, 25);
+  if (!ids.length) throw toolError('Give at least one item_id from list_listings.');
+  const own = await ownListings(db, userId, ids);
+  const token = await getToken();
+  const pct = Number(settings?.snapBestOfferPct ?? 10);
+  const results = [];
+  for (const id of ids) {
+    const l = own.get(id);
+    if (!l || l.status !== 'Active') { results.push({ item_id: id, ok: false, error: 'not one of your active listings' }); continue; }
+    if (l.listing_type && l.listing_type !== 'FixedPriceItem') { results.push({ item_id: id, ok: false, error: 'auction: Best Offer is for Buy It Now only' }); continue; }
+    try {
+      const r = await (deps.setBestOffer || setBestOffer)(token, { itemId: id, enabled: !!enabled, price: Number(l.price), pct });
+      await must(db.from('ebay_listings').update({ best_offer: !!enabled }).eq('user_id', userId).eq('item_id', id));
+      results.push({ item_id: id, ok: true, best_offer: !!enabled, auto_accept_at: r.accept, auto_decline_below: r.accept });
+    } catch (e) { results.push({ item_id: id, ok: false, error: e.message }); }
+  }
+  return { changed: results.filter((r) => r.ok).length, results };
+}
+
+export async function changeListingPrices({ db, userId, getToken, deps = {} }, { changes, user_confirmed, confirm_large_changes = false }) {
+  if (user_confirmed !== true) throw toolError('This changes prices on live eBay listings. Show the user each listing with its old and new price, get a clear yes, then call again with user_confirmed=true.');
+  const list = (changes || []).slice(0, 25).map((c) => ({ itemId: String(c.item_id), newPrice: Math.round(Number(c.new_price) * 100) / 100, reason: 'agent' }));
+  const problem = validateChanges(list);
+  if (problem) throw toolError(problem);
+  const own = await ownListings(db, userId, list.map((c) => c.itemId));
+  const listings = [...own.values()];
+  for (const c of list) c.oldPrice = own.get(c.itemId) ? Number(own.get(c.itemId).price) : null;
+  const refused = checkAgainstListings(list, listings, { confirmLargeChanges: confirm_large_changes === true });
+  if (refused) throw toolError(refused.replace('Send confirmLargeChanges: true if they are intended.', 'If the user confirmed these big changes specifically, call again with confirm_large_changes=true.'));
+  const token = await getToken();
+  const results = await (deps.revisePrices || revisePrices)(token, list);
+  await recordPriceChanges({ connected: true, admin: db, userId }, results, list).catch(() => {});
+  return {
+    changed: results.filter((r) => r.ok).length,
+    results: results.map((r) => ({ item_id: r.itemId, ok: r.ok, price: r.price, error: r.error || null, notes: r.warnings?.length ? r.warnings : undefined })),
+    note: 'If eBay refused a price because of Best Offer, set_best_offer with enabled=false (after the user\'s yes) and try again.',
+  };
 }
