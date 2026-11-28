@@ -7,3 +7,6 @@ dist
 .env.*.local
 .netlify
 .vercel
+e2e/.dist
+e2e/.dist-tyche
+e2e/.shots
