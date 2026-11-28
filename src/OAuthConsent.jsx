@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase.js';
 import { Hedge, Clouds } from './Scenery.jsx';
+import { Wordmark } from './brand.jsx';
 
 // /oauth/consent: shown when an AI app (e.g. the Claude app) asks to connect to CardDesk.
 // Supabase Auth runs the OAuth 2.1 flow; this page only shows who is asking and records the answer.
@@ -45,7 +46,7 @@ export default function OAuthConsent({ session }) {
     <div className="center-screen">
       <Clouds />
       <div className="bg-card auth-card" style={card}>
-        <h1 className="wordmark">Card<span>Desk</span></h1>
+        <Wordmark />
         {error ? <p style={{ color: 'var(--bad)', fontSize: '0.85rem' }}>{error}</p> : !details ? <p className="quiet">Loading…</p> : (
           <>
             <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', margin: '14px 0 4px' }}>Connect {details.client?.name || 'an app'} to your CardDesk?</h2>

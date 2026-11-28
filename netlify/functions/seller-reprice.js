@@ -10,6 +10,7 @@
 //  - a change of 50% or more against the synced price is refused unless confirmLargeChanges is true
 import { getSellerContext, recordPriceChanges } from '../lib/seller-adapter.js';
 import { revisePrices, setBestOffer } from '../lib/trading-price.js';
+import { requireFeature, requireCards } from '../lib/billing.js';
 
 const MAX_CHANGES = 200;
 export const LARGE_CHANGE = 0.5;
@@ -65,6 +66,7 @@ export default async (req) => {
     const ctx = await getSellerContext(req, { withToken: true });
     if (ctx.response) return ctx.response;
     if (ctx.reason === 'ebay_reconnect') return json({ error: ctx.error || 'Reconnect your eBay account.' }, 409);
+    { const no = await requireFeature(ctx.admin, ctx.userId, 'repricer'); if (no) return no; }
     if (!ctx.connected) {
       const results = changes.map(c => ({ itemId: c.itemId, ok: true, price: c.newPrice, error: null, warnings: [] }));
       return json({ demo: true, results });
@@ -93,6 +95,7 @@ async function bestOfferAction(req, body) {
     const ctx = await getSellerContext(req, { withToken: true });
     if (ctx.response) return ctx.response;
     if (ctx.reason === 'ebay_reconnect') return json({ error: ctx.error || 'Reconnect your eBay account.' }, 409);
+    { const no = await requireFeature(ctx.admin, ctx.userId, 'repricer'); if (no) return no; }
     if (!ctx.connected) return json({ demo: true, result: { itemId, enabled: body.enabled } });
     const { data: l, error } = await ctx.admin.from('ebay_listings').select('item_id, price, status, listing_type')
       .eq('user_id', ctx.userId).eq('item_id', itemId).maybeSingle();

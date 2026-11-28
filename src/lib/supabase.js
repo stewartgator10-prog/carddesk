@@ -15,5 +15,10 @@ export async function apiFetch(path, init = {}) {
   const token = data.session?.access_token;
   const headers = new Headers(init.headers || {});
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch(path, { ...init, headers });
+  const res = await fetch(path, { ...init, headers });
+  // A plan limit (Tyche Cards): tell the app so it can offer the upgrade. The caller still gets the response.
+  if (res.status === 402) {
+    res.clone().json().then((b) => { if (b?.code === 'UPGRADE') window.dispatchEvent(new CustomEvent('tyche:upgrade', { detail: b })); }).catch(() => {});
+  }
+  return res;
 }

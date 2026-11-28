@@ -9,6 +9,7 @@
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, json } from '../lib/ebay-seller.js';
 import { scanCollectionPhoto, repriceItem, refreshCollection, recheckAlerts, sendToSnap } from '../lib/collection.js';
+import { requireFeature, requireCards } from '../lib/billing.js';
 
 export default async (req) => {
   if (req.method !== 'POST') return json(405, { error: 'Use POST.' });
@@ -18,6 +19,8 @@ export default async (req) => {
   const db = getSupabaseAdmin();
   const body = (await req.json().catch(() => null)) || {};
   try {
+    { const no = await requireFeature(db, userId, 'collection'); if (no) return no; }
+    if (body.action === 'scan') { const no = await requireCards(db, userId, 1); if (no) return no; }
     switch (body.action) {
       case 'scan': return json(200, await scanCollectionPhoto({ db, userId, photoPath: String(body.photoPath || ''), kind: body.kind }));
       case 'reprice': return json(200, await repriceItem({ db, userId, id: String(body.id || '') }));

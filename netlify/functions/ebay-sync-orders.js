@@ -7,6 +7,7 @@
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, getSellerAccessToken } from '../lib/ebay-seller.js';
 import { normalizeOrder, normalizeTransaction, computeLinePnl, matchLinesToInventory } from '../lib/pnl.js';
+import { requireFeature } from '../lib/billing.js';
 
 const FULFILLMENT = 'https://api.ebay.com/sell/fulfillment/v1/order';
 const FINANCES = 'https://apiz.ebay.com/sell/finances/v1/transaction';
@@ -54,6 +55,7 @@ export default async (req) => {
   const db = getSupabaseAdmin();
 
   try {
+    { const no = await requireFeature(db, userId, 'profit'); if (no) return no; }
     const body = (await req.json().catch(() => null)) || {};
     const days = body.days == null || body.days === '' ? null : Number(body.days);
     if (days !== null && !(days > 0)) return json({ error: 'days must be a positive number of days to look back (max 730).' }, 400);

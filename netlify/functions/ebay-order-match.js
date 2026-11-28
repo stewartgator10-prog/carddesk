@@ -8,6 +8,7 @@
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin } from '../lib/ebay-seller.js';
 import { recompute, markInventorySold, releaseInventory } from './ebay-sync-orders.js';
+import { requireFeature } from '../lib/billing.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -18,6 +19,7 @@ export default async (req) => {
   const userId = auth.user.id;
   const db = getSupabaseAdmin();
 
+  { const no = await requireFeature(db, userId, 'profit'); if (no) return no; }
   const { line_item_id, action, inventory_id } = (await req.json().catch(() => null)) || {};
   if (!line_item_id || !['confirm', 'ignore', 'unlink'].includes(action)) return json({ error: 'line_item_id and a valid action are required' }, 400);
 

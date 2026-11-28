@@ -9,6 +9,7 @@
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, json } from '../lib/ebay-seller.js';
 import { identifyOfferPhoto, acceptOffer } from '../lib/buy-offer.js';
+import { requireFeature, requireCards } from '../lib/billing.js';
 
 export default async (req) => {
   if (req.method !== 'POST') return json(405, { error: 'Use POST.' });
@@ -18,6 +19,7 @@ export default async (req) => {
   const db = getSupabaseAdmin();
   const body = (await req.json().catch(() => null)) || {};
   try {
+    { const no = await requireFeature(db, userId, 'buy_offers'); if (no) return no; }
     if (body.action === 'identify') {
       return json(200, await identifyOfferPhoto({ db, userId, offerId: String(body.offerId || ''), photoPath: String(body.photoPath || ''), kind: body.kind }));
     }
