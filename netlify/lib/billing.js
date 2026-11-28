@@ -125,7 +125,10 @@ export async function checkoutUrl({ db, user, plan, interval, origin, opts }) {
 export async function portalUrl({ db, user, origin, opts }) {
   const sub = await getSubscription(db, user.id);
   if (!sub?.stripe_customer_id) throw Object.assign(new Error('There is no billing account yet. Choose a plan first.'), { status: 409 });
-  const s = await stripe('POST', '/billing_portal/sessions', { customer: sub.stripe_customer_id, return_url: `${origin}/app` }, opts);
+  // Tyche Cards has its own portal setup (plans it can switch between, cancel at period end), so
+  // other products on the same Stripe account keep theirs.
+  const s = await stripe('POST', '/billing_portal/sessions', { customer: sub.stripe_customer_id, return_url: `${origin}/app`,
+    configuration: process.env.STRIPE_PORTAL_CONFIGURATION || undefined }, opts);
   return s.url;
 }
 
