@@ -5,6 +5,9 @@
 import { signCron } from '../lib/cron-signature.js';
 
 export default async () => {
+  // Both sites share one database, so only one of them should run the nightly refresh for everyone.
+  // NIGHTLY_REFRESH=off on the other site.
+  if (process.env.NIGHTLY_REFRESH === 'off') { console.info('market-nightly: off on this site'); return; }
   const base = process.env.URL || process.env.DEPLOY_PRIME_URL;
   if (!base) { console.error('market-nightly: no site URL'); return; }
   const { ts, sig } = signCron();
