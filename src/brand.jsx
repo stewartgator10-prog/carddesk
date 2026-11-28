@@ -27,6 +27,12 @@ export function TycheMark({ size = 32, gold = '#c9a24a', ground = 'none', title 
   );
 }
 
+// The Tyche Cards emblem: Tyche with her cornucopia of cards under a mural crown (the logo artwork).
+export function TycheEmblem({ height = 40, alt = 'Tyche Cards' }) {
+  const width = Math.round(height * 1.228);
+  return <img src="/brand/tyche-emblem-96.webp" srcSet="/brand/tyche-emblem-96.webp 1x, /brand/tyche-emblem-192.webp 2x" width={width} height={height} alt={alt} style={{ display: 'block', height, width: 'auto' }} />;
+}
+
 export function Wordmark({ className = 'wordmark' }) {
   return <h1 className={className}>{BRAND.first}<span>{BRAND.second}</span></h1>;
 }

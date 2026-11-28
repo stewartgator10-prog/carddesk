@@ -3,7 +3,7 @@ import '@fontsource/marcellus/400.css';
 import '@fontsource-variable/inter';
 import './home.css';
 import { supabase, supabaseConfigured } from './lib/supabase.js';
-import { TycheMark } from './brand.jsx';
+import { TycheEmblem } from './brand.jsx';
 import { PLANS, PLAN_ORDER } from '../netlify/lib/plans.js';
 
 // The public Tyche Cards site: homepage with pricing, and the terms and privacy pages.
@@ -28,7 +28,7 @@ function Nav({ signedIn }) {
   return (
     <header className="ty-nav">
       <div className="ty-wrap ty-nav-row">
-        <a href="/" className="ty-brand" aria-label="Tyche Cards home"><TycheMark size={34} gold="var(--gold)" /><span>Tyche Cards</span></a>
+        <a href="/" className="ty-brand" aria-label="Tyche Cards home"><TycheEmblem height={42} alt="" /><span>Tyche Cards</span></a>
         <nav className="ty-links" aria-label="Main">
           <a href="/#features">Features</a>
           <a href="/#pricing">Pricing</a>
@@ -134,7 +134,7 @@ function Landing() {
             {FEATURES.map(([t, d]) => <div key={t} className="ty-feature"><h3>{t}</h3><p>{d}</p></div>)}
           </div>
           <div className="ty-ai">
-            <TycheMark size={40} gold="var(--gold)" />
+            <TycheEmblem height={52} alt="" />
             <div><h3>Works with your AI assistant</h3><p>Connect Claude, Muse or another AI app and run your store by chat: "price this stack", "which collection cards should I sell?", "turn Best Offer off on these". Anything that changes eBay asks you first.</p></div>
           </div>
         </div>
@@ -169,9 +169,13 @@ function Landing() {
       </section>
 
       <section className="ty-section ty-founder">
-        <div className="ty-wrap ty-narrow">
-          <h2>Built at a real card table</h2>
-          <p>Tyche Cards grew out of a working card business: hundreds of live listings, Japanese misprints, binder buys at shows. Every feature was used on real cards before it reached this page.</p>
+        <div className="ty-wrap ty-founder-row">
+          <img className="ty-lockup" src="/brand/tyche-logo-480.webp" width="480" height="569" alt="Tyche Cards: Tyche, goddess of fortune, holding a cornucopia of trading cards. Fortune favors the listed." loading="lazy" />
+          <div>
+            <h2>Built at a real card table</h2>
+            <p>Tyche Cards grew out of a working card business: hundreds of live listings, Japanese misprints, binder buys at shows. Every feature was used on real cards before it reached this page.</p>
+            <p>Tyche was the Greek goddess of fortune, usually shown with a crown and a horn of plenty. Card selling has plenty of luck in it. The rest is listing well, pricing right and knowing your numbers, and that's the part we handle.</p>
+          </div>
         </div>
       </section>
 
@@ -199,7 +203,7 @@ function Footer() {
   return (
     <footer className="ty-footer">
       <div className="ty-wrap ty-foot-row">
-        <div className="ty-brand ty-brand-sm"><TycheMark size={24} gold="var(--gold)" /><span>Tyche Cards</span></div>
+        <div className="ty-brand ty-brand-sm"><TycheEmblem height={30} alt="" /><span>Tyche Cards</span></div>
         <nav aria-label="Legal"><a href="/legal/terms">Terms</a><a href="/legal/privacy">Privacy</a><a href="https://techboxsolution.com/" target="_blank" rel="noreferrer">Made by TechBox Solutions</a></nav>
         <div className="ty-fine">Not affiliated with eBay, The Pokémon Company, Wizards of the Coast, Konami, Bandai or Disney. Card names are trademarks of their owners.</div>
       </div>

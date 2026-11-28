@@ -33,7 +33,7 @@ import { OFFER_DEFAULTS } from '../netlify/lib/offer-logic.js';
 import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
 import { DialogHost } from './lib/dialog.jsx';
 import UpdateBanner from './UpdateBanner.jsx';
-import { IS_TYCHE, BRAND, Wordmark, TycheMark } from './brand.jsx';
+import { IS_TYCHE, BRAND, Wordmark, TycheEmblem } from './brand.jsx';
 import { usePlan, PlanBadge, PlanPanel, Locked, locked, startCheckout } from './PlanPanel.jsx';
 
 // Views that need a paid plan on Tyche Cards (the founder site has no plans).
@@ -437,7 +437,7 @@ export default function CardDeskPro({ session }) {
         <header className="app-pad" style={{ padding: '22px 32px 14px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div className="sky-text">
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-              {IS_TYCHE && <span style={{ alignSelf: 'center' }}><TycheMark size={34} gold="var(--leaf-deep)" /></span>}
+              {IS_TYCHE && <span style={{ alignSelf: 'center' }}><TycheEmblem height={44} alt="" /></span>}
               <Wordmark />
               <span className="quiet" style={{ fontSize: '0.8rem' }}>{BRAND.tagline}</span>
             </div>
