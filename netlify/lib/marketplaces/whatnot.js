@@ -12,16 +12,12 @@ import { snapSku } from '../ebay-listing.js';
 import { listingPhotoPaths, MAX_LISTING_PHOTOS, LISTABLE_GAMES } from '../snap-logic.js';
 import { buildDescription } from '../listing-copy.js';
 
-export const TOKEN_PREFIX = 'wn_pat_tk_';
-export const APP_TOKEN_PREFIX = 'wn_access_tk_';   // OAuth app tokens, once the partner app exists
-// CONFIRM (1): exact scope names. Shown to the seller to tick when they create the token.
-export const WHATNOT_SCOPES = ['read:inventory', 'write:inventory', 'read:merchandising', 'write:merchandising', 'read:orders'];
-export const TOKEN_PAGE = 'https://www.whatnot.com/dashboard/developer?tab=tokens';
+import { TOKEN_PREFIX, APP_TOKEN_PREFIX, WHATNOT_SCOPES, TOKEN_PAGE, CONDITION_LABELS } from './whatnot-info.js';
+
+export { TOKEN_PREFIX, APP_TOKEN_PREFIX, WHATNOT_SCOPES, TOKEN_PAGE, CONDITION_LABELS };
 export const MAX_WHATNOT_PHOTOS = MAX_LISTING_PHOTOS;   // CONFIRM (2): Whatnot's photo limit
 const PAGE = 50;                                         // Whatnot's maximum page size
 
-// Snap condition codes -> Whatnot's words.
-export const CONDITION_LABELS = { NM: 'Near Mint', LP: 'Lightly Played', MP: 'Moderately Played', HP: 'Heavily Played', DMG: 'Damaged' };
 // CONFIRM (2, 12): Whatnot has no condition field on a product; condition is a category attribute.
 // Fill in the attribute id from the taxonomy; until then condition goes in the description only.
 export const CONDITION_ATTRIBUTE_ID = null;

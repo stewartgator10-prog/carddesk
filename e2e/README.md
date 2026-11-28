@@ -10,6 +10,7 @@ node e2e/tyche-site.cjs e2e/.dist-tyche e2e/.dist e2e/.shots        # homepage, 
 node e2e/photo-editor.cjs e2e/.dist e2e/.shots e2e/fixtures/card-photo.jpg
 node e2e/listing-import.cjs e2e/.dist e2e/.shots e2e/fixtures/card-photo.jpg
 node e2e/model-trial.cjs e2e/.dist e2e/.shots
+node e2e/cross-listing.cjs e2e/.dist e2e/.dist-tyche e2e/.shots e2e/fixtures/card-photo.jpg   # Whatnot connect, chips, sale notes, List on Whatnot, Pro message
 node e2e/email-templates.cjs supabase/templates e2e/.shots
 ```
 

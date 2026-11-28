@@ -197,7 +197,7 @@ export default function RepricerTab({ comps, inventory, settings, onGoToComps, o
           <AlertTriangle size={16} className="accent-amber" style={{ flexShrink: 0, marginTop: 2 }} />
           <div>
             <strong className="accent-amber">DEMO MODE.</strong> Your eBay seller account isn't connected yet, so these are sample listings and
-            nothing is sent to eBay. Connect eBay on the <button className="btn-icon" style={{ padding: 0, textDecoration: 'underline', color: 'inherit', fontSize: 'inherit', fontFamily: 'inherit' }} onClick={onGoToListings}>eBay account</button> view
+            nothing is sent to eBay. Connect eBay on the <button className="btn-icon" style={{ padding: 0, textDecoration: 'underline', color: 'inherit', fontSize: 'inherit', fontFamily: 'inherit' }} onClick={onGoToListings}>Marketplaces</button> view
             and sync, then your real active listings load here and pushes go straight to eBay.
           </div>
         </div>

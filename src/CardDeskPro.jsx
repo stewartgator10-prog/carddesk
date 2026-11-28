@@ -18,7 +18,7 @@ const SECTIONS = [
     { id: 'scanner', label: 'Bulk Scanner', Icon: Search }, { id: 'watchlist', label: 'Watchlist', Icon: Eye },
     { id: 'comps', label: 'Sold Comps', Icon: BarChart3 }] },
   { id: 'prices', label: 'Listings & Prices', Icon: Tag, views: [
-    { id: 'repricer', label: 'Repricer', Icon: Tag }, { id: 'listings', label: 'eBay account', Icon: Store }] },
+    { id: 'repricer', label: 'Repricer', Icon: Tag }, { id: 'listings', label: 'Marketplaces', Icon: Store }] },
   { id: 'stock', label: 'Inventory', Icon: Package, views: [
     { id: 'inventory', label: 'Stock & P&L', Icon: Package }, { id: 'costs', label: 'Costs', Icon: Receipt }] },
   { id: 'sales', label: 'Sales & Profit', Icon: DollarSign, views: [{ id: 'ebaysales', label: 'eBay Sales · Real P&L' }] },
@@ -783,7 +783,7 @@ export default function CardDeskPro({ session }) {
         )}
 
         {/* ============ EBAY LISTINGS ============ */}
-        {tab === 'listings' && <ListingsTab />}
+        {tab === 'listings' && <ListingsTab plan={plan} />}
 
         {/* ============ REPRICER ============ */}
         {tab === 'repricer' && !lockedFeature && (

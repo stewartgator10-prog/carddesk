@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ExternalLink, Link2, Loader, Unlink, Store } from 'lucide-react';
 import { supabase } from './lib/supabase.js';
 import { askConfirm } from './lib/dialog.jsx';
+import MarketplacesPanel from './MarketplacesPanel.jsx';
 
 const fmt = (n, cur = 'USD') =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || 'USD' }).format(n);
@@ -31,7 +32,7 @@ async function api(method, body) {
   return out;
 }
 
-export default function ListingsTab() {
+export default function ListingsTab({ plan = null }) {
   const [account, setAccount] = useState(null);
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -198,6 +199,7 @@ export default function ListingsTab() {
           </div>
         </>
       )}
+      <MarketplacesPanel plan={plan} />
     </div>
   );
 }

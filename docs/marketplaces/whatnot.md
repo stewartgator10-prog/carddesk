@@ -82,3 +82,38 @@ Whatnot store; the product integration itself calls the REST API from Netlify Fu
 ## Network
 This repo's cloud environment needs `developers.whatnot.com`, `api.whatnot.com` and `mcp.whatnot.com`
 on its allowed hosts to read docs, call the API or connect the MCP server.
+
+## What is built (Nov 29, 2026; spec docs/specs/cross-listing-whatnot.md)
+- `netlify/lib/marketplaces/` adapter contract (`registry.js`), `whatnot.js` + `whatnot-client.js`
+  (8 req/s per seller, 429 retry with Retry-After max 10 s, 10 s timeout), `ebay.js` (wraps existing code,
+  adds `EndFixedPriceItem` and quantity revise), `service.js` (what the endpoints do).
+- Token sealed with `netlify/lib/secret-box.js` (AES-256-GCM) in `marketplace_accounts.access_token_enc`.
+- `netlify/lib/sell-once.js`: sale ledger in `marketplace_orders`, ends/re-counts the other listings.
+- Endpoints `/api/marketplaces`, `/api/marketplace-listings`, `/api/marketplace-sales`; schedule
+  `marketplace-sales-cron` (every 5 min) -> `/api/marketplace-sales-run` (background, signed).
+- UI: Whatnot panel under eBay in Listings & Prices -> Marketplaces; chips, List on Whatnot, Quantity,
+  On Whatnot filter, sale notes and reconnect banner in Snap to List.
+
+## Deploy notes
+- Apply `supabase/migrations/20261129000000_marketplaces.sql`.
+- `MARKETPLACE_TOKEN_KEY` on BOTH sites, the same value: `openssl rand -base64 32`. Without it, connect
+  answers "Whatnot isn't set up on this site yet" and stores nothing.
+- `SALES_CHECK=off` on Tyche Cards (jaxspic runs the 5-minute check for everyone, like the nightly refresh).
+- `WHATNOT_CATEGORY_IDS` (JSON, e.g. `{"pokemon":"123","mtg":"456","other":"789"}`) until the taxonomy
+  ids are confirmed and written into `CATEGORY_IDS` in whatnot.js. A game with no id can't be listed yet.
+
+## Confirm against the live API before go-live (`// CONFIRM:` in the code)
+1. Scope names; whether `/users/me` says the token's scopes or expiry (it doesn't in the spec).
+2. `POST /products` with our body; whether Whatnot copies media URLs at create time (we send 1-hour
+   signed links or eBay picture links); max photos; condition attribute id (`CONDITION_ATTRIBUTE_ID`).
+3. Dimension profile id alone accepted; `dimension_profiles` shape.
+4. `Product.url` is the public product page.
+5. Merchandising `{ transaction_type: 'buy_it_now', reserve_for_live: false }` = shop only.
+6. `PATCH /products/{id}/variants` and `/inventory/set` bodies as sent.
+7. Ending: quantity 0 hides it from the shop? DELETE on a sold product (409?).
+8. `GET /products` has no filter: we page the newest 200 products for our `external_id` to adopt a lost create.
+9. `GET /orders` has no date filter: we page newest first back 72 h; order status values; whether a
+   cancelled order puts the stock back on Whatnot.
+10. Error body format for 400/403/409/422 (we read `detail` / `message`).
+11. `RateLimit-*` headers; per token or per app.
+12. Taxonomy ids per game; graded slabs.

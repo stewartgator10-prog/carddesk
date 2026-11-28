@@ -6,7 +6,9 @@ import CropImg from './lib/CropImg.jsx';
 import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS, liveChanges } from '../netlify/lib/snap-logic.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
-import { askConfirm, askValue } from './lib/dialog.jsx';
+import { askConfirm, askValue, askChoice } from './lib/dialog.jsx';
+import { chipsFor, saleSentence, currentListings } from '../netlify/lib/marketplace-text.js';
+import { CONDITION_LABELS as WN_CONDITIONS } from '../netlify/lib/marketplaces/whatnot-info.js';
 import { PhotoStrip, PhotoEditor } from './PhotoEditor.jsx';
 
 const money = (n, d = 2) => (n == null || !Number.isFinite(Number(n)) ? '—' : `$${Number(n).toFixed(d)}`);
@@ -18,7 +20,7 @@ const DONE = ['approved', 'listed'];
 const ARM_LABELS = { ...MODEL_LABELS, auto: 'Auto: Haiku, Opus when needed' };
 const ROUTE_REASONS = { not_a_card: 'not sure it was a card', low_confidence: 'unsure of the card', not_english: 'not in English', no_catalog_match: 'no catalog match', other_game: 'other game' };
 // Editing any of these after the eBay check means the check no longer describes the listing.
-const LISTING_FIELDS = ['photo_path', 'title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction', 'description'];
+const LISTING_FIELDS = ['photo_path', 'title', 'price', 'quantity', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction', 'description'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 const STATUS = {
@@ -74,7 +76,25 @@ export default function SnapTab({ userId, settings, setSettings }) {
     setUsage({ month: m.data || [], allTime: (all.data || []).reduce((t, r) => t + Number(r.cost_usd || 0), 0) });
   }, []);
 
-  useEffect(() => { loadItems(); loadUsage(); }, [loadItems, loadUsage]);
+  // ---------- other marketplaces (Whatnot): where each card is listed, and the connection ----------
+  const [mp, setMp] = useState({ listings: [], whatnot: null });
+  const loadMarketplaces = useCallback(async () => {
+    // Quietly empty when the tables aren't there yet or nothing is connected: the card looks as before.
+    const [rows, acct] = await Promise.all([
+      supabase.from('marketplace_listings').select('*').order('created_at', { ascending: false }).limit(5000).then((r) => (r.error ? [] : r.data || []), () => []),
+      apiFetch('/api/marketplaces').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    setMp({ listings: rows, whatnot: acct?.marketplaces?.find((m) => m.marketplace === 'whatnot' && m.connected) || null });
+  }, []);
+  useEffect(() => { loadItems(); loadUsage(); loadMarketplaces(); }, [loadItems, loadUsage, loadMarketplaces]);
+  const listingsByCard = useMemo(() => {
+    const m = new Map();
+    for (const l of mp.listings) if (l.snap_item_id) m.set(l.snap_item_id, [...(m.get(l.snap_item_id) || []), l]);
+    return m;
+  }, [mp.listings]);
+  const liveOn = (it, market) => (listingsByCard.get(it.id) || []).find((l) => l.marketplace === market && ['active', 'ending'].includes(l.status));
+  const whatnotOn = !!mp.whatnot;
+  const putListing = (l) => setMp((x) => ({ ...x, listings: [l, ...x.listings.filter((y) => y.id !== l.id)] }));
 
 
   const patchLocal = (id, patch) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
@@ -284,6 +304,97 @@ export default function SnapTab({ userId, settings, setSettings }) {
     setMsg(problems.length ? { type: 'error', text: `${ok} listed, ${problems.length} failed: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `${ok} card${ok === 1 ? '' : 's'} listed on eBay and added to inventory with their cost.${promoProblems.length ? ` Not promoted: ${[...new Set(promoProblems)][0]}` : ''}` });
   }
 
+  // ---------- Whatnot: list, change, end ----------
+  const photoCount = (it) => Math.max(listingPhotoPaths(it).length, (it.ebay_picture_urls || []).length);
+  const parseMoney = (raw) => Number(String(raw ?? '').replace(/[$,]/g, '').trim());
+  async function createOnWhatnot(it, price) {
+    const r = await postJson('/api/marketplace-listings', { action: 'create', marketplace: 'whatnot', snapItemId: it.id, price, quantity: Number(it.quantity) || 1 })
+      .catch((e) => ({ ok: false, data: { error: e.message } }));
+    if (r.ok) putListing(r.data.listing);
+    return r;
+  }
+  async function listOnWhatnot(it) {
+    const raw = await askValue('Whatnot price ($)', { title: 'Whatnot price', confirmLabel: 'Next', inputMode: 'decimal', initial: Number(it.price || 0).toFixed(2) });
+    if (raw == null) return;
+    const price = parseMoney(raw);
+    if (!(price >= 1)) { setMsg({ type: 'error', text: 'Enter a Whatnot price of at least $1.00, e.g. 12.50' }); return; }
+    const n = photoCount(it); const q = Number(it.quantity) || 1;
+    if (!(await askConfirm(`List on Whatnot now?\n\n${it.title} · ${money(price)} · Qty ${q} · ${WN_CONDITIONS[it.condition] || 'Near Mint'} · ${n} photo${n === 1 ? '' : 's'}\n\nIt goes live in your Whatnot shop as Buy It Now right away.`,
+      { title: 'List on Whatnot', confirmLabel: 'List on Whatnot' }))) return;
+    setEbayBusy({ label: 'Listing on Whatnot', done: 0, total: 1 });
+    const r = await createOnWhatnot(it, price);
+    setEbayBusy(null);
+    if (r.ok) setMsg({ type: 'ok', text: 'Listed on Whatnot.' });
+    else { setMsg({ type: 'error', text: r.data.error || `Whatnot listing failed (${r.status})` }); loadMarketplaces(); }
+  }
+  async function listAllOnWhatnot(list) {
+    if (!list.length) return;
+    const total = list.reduce((t, i) => t + Number(i.price || 0), 0);
+    if (!(await askConfirm(`List ${list.length} card${list.length === 1 ? '' : 's'} on Whatnot now?\n\nTotal price: ${money(total)} (each at its card price)\n\nThey go live in your Whatnot shop as Buy It Now right away.`,
+      { title: 'List on Whatnot', confirmLabel: `List ${list.length} on Whatnot` }))) return;
+    setEbayBusy({ label: 'Listing on Whatnot', done: 0, total: list.length }); setMsg(null);
+    let ok = 0; const problems = [];
+    for (const [n, it] of list.entries()) {
+      const r = await createOnWhatnot(it, Number(it.price));
+      if (r.ok) ok += 1; else {
+        problems.push(`${it.title || it.card_name}: ${r.data.error || r.status}`);
+        if (r.status === 402 || r.data.code === 'reconnect' || r.data.code === 'not_set_up') break;
+      }
+      setEbayBusy({ label: 'Listing on Whatnot', done: n + 1, total: list.length });
+    }
+    setEbayBusy(null);
+    await loadMarketplaces();
+    setMsg(problems.length ? { type: 'error', text: `${ok} listed on Whatnot, ${problems.length} didn't: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `${ok} card${ok === 1 ? '' : 's'} listed on Whatnot.` });
+  }
+  async function listingCall(body, okText) {
+    const r = await postJson('/api/marketplace-listings', body).catch((e) => ({ ok: false, data: { error: e.message } }));
+    if (r.ok) { if (r.data.listing) putListing(r.data.listing); setMsg({ type: 'ok', text: okText }); } else setMsg({ type: 'error', text: r.data.error || `Failed (${r.status})` });
+    return r;
+  }
+  async function endListing(it, l) {
+    const where = l.marketplace === 'ebay' ? 'eBay' : 'Whatnot';
+    if (!(await askConfirm(l.marketplace === 'whatnot' ? 'Take this card down from your Whatnot shop?' : `End your eBay listing #${l.external_id}?`, { title: `End on ${where}`, confirmLabel: `End on ${where}`, danger: true }))) return;
+    const r = await listingCall({ action: 'end', listingId: l.id }, `Ended on ${where}.`);
+    if (r.ok) { await loadItems(); await loadMarketplaces(); }
+  }
+  async function onChip(it, l) {
+    if (l.marketplace !== 'whatnot' || !['active', 'ending'].includes(l.status)) { if (l.url) window.open(l.url, '_blank', 'noopener'); return; }
+    const pick = await askChoice(`${it.title}\nOn Whatnot at ${money(l.price)}, ${l.quantity ?? 1} available.`,
+      [{ value: 'end', label: 'End on Whatnot' }, ...(l.url ? [{ value: 'open', label: 'Open on Whatnot' }] : []), { value: 'qty', label: 'Change quantity' }, { value: 'price', label: 'Change price' }], { title: 'Whatnot listing' });
+    if (pick === 'open') window.open(l.url, '_blank', 'noopener');
+    if (pick === 'end') await endListing(it, l);
+    if (pick === 'qty') await changeQuantity(it, null);
+    if (pick === 'price') {
+      const raw = await askValue('New Whatnot price ($)', { title: 'Change price', confirmLabel: 'Next', inputMode: 'decimal', initial: Number(l.price || 0).toFixed(2) });
+      if (raw == null) return;
+      const price = parseMoney(raw);
+      if (!(price >= 1)) { setMsg({ type: 'error', text: 'Enter a Whatnot price of at least $1.00.' }); return; }
+      if (!(await askConfirm(`Change the Whatnot price to ${money(price)}?\n\nBuyers see it right away. Your eBay price stays the same.`, { title: 'Change price', confirmLabel: 'Change on Whatnot' }))) return;
+      await listingCall({ action: 'update', listingId: l.id, price }, `Whatnot price is now ${money(price)}.`);
+    }
+  }
+  // The card's stock. With live listings it is pushed to every one of them after a yes.
+  async function changeQuantity(it, value) {
+    let q = value;
+    if (q == null) {
+      const raw = await askValue('How many of this card do you have?', { title: 'Change quantity', confirmLabel: 'Next', inputMode: 'numeric', initial: String(it.quantity ?? 1) });
+      if (raw == null) return false;
+      q = Number(String(raw).trim());
+    }
+    if (!Number.isInteger(q) || q < 1 || q > 999) { setMsg({ type: 'error', text: 'Enter a whole number from 1 to 999. To stop selling, end the listing.' }); return false; }
+    const live = (listingsByCard.get(it.id) || []).filter((l) => l.status === 'active');
+    if (!live.length) { await save(it.id, { quantity: q }); return true; }
+    const where = [...new Set(live.map((l) => (l.marketplace === 'ebay' ? 'eBay' : 'Whatnot')))].join(' and ');
+    if (!(await askConfirm(`Change stock to ${q} on ${where}?`, { title: 'Change quantity', confirmLabel: `Change on ${where}` }))) return false;
+    const r = await postJson('/api/marketplace-listings', { action: 'stock', snapItemId: it.id, quantity: q }).catch((e) => ({ ok: false, data: { error: e.message } }));
+    if (!r.ok) { setMsg({ type: 'error', text: r.data.error || `Failed (${r.status})` }); return false; }
+    patchLocal(it.id, { quantity: q, sold_out_at: null });
+    const bad = r.data.results.filter((x) => !x.ok);
+    setMsg(bad.length ? { type: 'error', text: `Stock is ${q}, but ${bad.map((b) => `${b.marketplace === 'ebay' ? 'eBay' : 'Whatnot'} didn't change: ${b.error}`).join(' | ')}` } : { type: 'ok', text: `Stock is ${q} on ${where}.` });
+    await loadMarketplaces();
+    return true;
+  }
+
   // One order's total (cards + shipping + tax) split across the cards on screen by market value.
   async function batchPurchase() {
     const cards = visible.filter((i) => !['uploaded', 'identifying'].includes(i.status));
@@ -311,10 +422,14 @@ export default function SnapTab({ userId, settings, setSettings }) {
   const [pageSize, setPageSize] = useState(24);
   useEffect(() => { setPageSize(24); }, [filter, search]);
   const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const matching = items.filter((i) => (filter === 'open' ? !DONE.includes(i.status) : filter === 'changed' ? liveChanges(i).length > 0 : i.status === filter)
+  const matching = items.filter((i) => (filter === 'open' ? !DONE.includes(i.status) : filter === 'changed' ? liveChanges(i).length > 0 : filter === 'whatnot' ? !!liveOn(i, 'whatnot') : i.status === filter)
     && words.every((w) => `${i.title || ''} ${i.card_name || ''} ${i.ebay_item_id || ''} ${i.sku || ''}`.toLowerCase().includes(w)));
   const visible = matching.slice(0, pageSize);
   const changedCount = useMemo(() => items.filter((i) => liveChanges(i).length > 0).length, [items]);
+  const whatnotCount = items.filter((i) => liveOn(i, 'whatnot')).length;
+  const toWhatnot = whatnotOn && ['approved', 'listed'].includes(filter)
+    ? matching.filter((i) => DONE.includes(i.status) && !liveOn(i, 'whatnot') && Number(i.quantity ?? 1) > 0 && Number(i.price) >= 1 && !i.photo_crop) : [];
+  const wnReconnect = mp.whatnot?.status === 'reconnect' && mp.listings.some((l) => l.marketplace === 'whatnot' && l.status === 'active');
 
   // Signed links for the photos of the cards on screen (valid for an hour).
   const visibleKey = visible.map((i) => listingPhotoPaths(i).join(',')).join('|');
@@ -364,14 +479,21 @@ export default function SnapTab({ userId, settings, setSettings }) {
 
       {panel === 'queue' && (
         <>
+          {wnReconnect && (
+            <div role="alert" style={{ padding: '10px 14px', border: '1px solid var(--warn)', fontSize: '0.8rem', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="accent-amber" style={{ flex: 1, minWidth: 180 }}>Whatnot stopped accepting your token, so we can't see Whatnot sales. Paste a new one.</span>
+              <a className="btn-primary" href="?tab=listings" style={{ padding: '6px 12px', fontSize: '0.75rem', textDecoration: 'none' }}>Open Marketplaces</a>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`], ...(changedCount ? [['changed', `Not on eBay yet (${changedCount})`]] : [])].map(([k, l]) => (
+            {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`], ...(changedCount ? [['changed', `Not on eBay yet (${changedCount})`]] : []), ...(whatnotOn ? [['whatnot', `On Whatnot (${whatnotCount})`]] : [])].map(([k, l]) => (
               <button key={k} className="btn-ghost" onClick={() => setFilter(k)} style={{ padding: '6px 10px', fontSize: '0.7rem', borderColor: filter === k ? 'var(--active)' : undefined, color: filter === k ? 'var(--active)' : undefined }}>{l}</button>
             ))}
             <span style={{ flex: 1 }} />
             <button className="btn-ghost" onClick={loadItems} title="Reload" style={{ padding: '6px 10px' }}><RefreshCw size={14} /></button>
             <button className="btn-ghost" disabled={!visible.length} onClick={batchPurchase} title="Split what you paid for these cards across them" style={{ padding: '6px 10px', fontSize: '0.7rem' }}>$ Purchase cost</button>
             {filter !== 'approved' && filter !== 'listed' && <button className="btn-primary" disabled={!counts.ready} onClick={approveAllReady} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Check size={14} /> APPROVE ALL READY ({counts.ready})</button>}
+            {toWhatnot.length > 0 && <button className="btn-ghost" disabled={!!ebayBusy} onClick={() => listAllOnWhatnot(toWhatnot)} style={{ padding: '8px 12px', fontSize: '0.75rem' }}>LIST {toWhatnot.length} ON WHATNOT</button>}
             {filter === 'approved' && <>
               <button className="btn-ghost" disabled={!toCheck || !!ebayBusy} onClick={checkApproved} title="Uploads photos and runs eBay's free listing check. Nothing goes live." style={{ padding: '8px 12px', fontSize: '0.75rem' }}>CHECK {toCheck} WITH EBAY</button>
               <button className="btn-primary" disabled={!toPublish || !!ebayBusy} onClick={publishChecked} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Store size={14} /> PUBLISH {toPublish} TO EBAY</button>
@@ -388,7 +510,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} photo={photoUrls[it.photo_path]} photoUrls={photoUrls} photoBusy={photoBusy[it.id]} photo_={photoHandlers(it)} onSendPhotos={() => sendChangesToEbay(it)} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onReplace={(f) => replacePhoto(it, f)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} listings={listingsByCard.get(it.id) || []} whatnotOn={whatnotOn} mp_={{ onList: () => listOnWhatnot(it), onChip: (l) => onChip(it, l), onEnd: (l) => endListing(it, l), onQuantity: (q) => changeQuantity(it, q) }} photo={photoUrls[it.photo_path]} photoUrls={photoUrls} photoBusy={photoBusy[it.id]} photo_={photoHandlers(it)} onSendPhotos={() => sendChangesToEbay(it)} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onReplace={(f) => replacePhoto(it, f)} />)}
             </div>
           )}
           {matching.length > visible.length && (
@@ -415,7 +537,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
   );
 }
 
-function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, onSendPhotos, onSave, onApprove, onDiscard, onRetry, onAddPhotos, onReplace }) {
+function SnapCard({ it, listings = [], whatnotOn = false, mp_ = {}, photo, photoUrls = {}, photoBusy = null, photo_ = {}, onSendPhotos, onSave, onApprove, onDiscard, onRetry, onAddPhotos, onReplace }) {
   const frontInput = useRef(null);
   const [d, setD] = useState(it);
   useEffect(() => { setD(it); }, [it]);
@@ -431,8 +553,10 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
     <div className="bg-card" style={{ padding: 12, display: 'grid', gap: 8, borderColor: it.status === 'needs_review' || it.status === 'failed' ? color : undefined }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem' }}>
         <span style={{ color, fontWeight: 700, letterSpacing: '0.1em' }}>{busy && <Loader size={11} className="spin" />} {label}</span>
-        <span className="ink-faint" title={it.extraction?.route ? `Read by Haiku first, then ${MODEL_LABELS[it.model] || it.model}: ${ROUTE_REASONS[it.extraction.route.escalated] || it.extraction.route.escalated}` : undefined}>{it.model ? (it.extraction?.route && !it.extraction.route.failed ? `Haiku → ${(MODEL_LABELS[it.model] || it.model).replace('Claude ', '')}` : (MODEL_LABELS[it.model] || it.model)) : ''}{it.confidence != null ? ` · ${Math.round(it.confidence * 100)}% sure` : ''}</span>
+        <span className="ink-faint" style={{ textAlign: 'right' }} title={it.extraction?.route ? `Read by Haiku first, then ${MODEL_LABELS[it.model] || it.model}: ${ROUTE_REASONS[it.extraction.route.escalated] || it.extraction.route.escalated}` : undefined}>{it.model ? (it.extraction?.route && !it.extraction.route.failed ? `Haiku → ${(MODEL_LABELS[it.model] || it.model).replace('Claude ', '')}` : (MODEL_LABELS[it.model] || it.model)) : ''}{it.confidence != null ? ` · ${Math.round(it.confidence * 100)}% sure` : ''}</span>
       </div>
+      {DONE.includes(it.status) && <SaleNote it={it} listings={listings} onEnd={mp_.onEnd} />}
+      {DONE.includes(it.status) && (whatnotOn || listings.some((l) => l.marketplace !== 'ebay')) && <MarketChips it={it} listings={listings} whatnotOn={whatnotOn} mp_={mp_} />}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 0, overflow: 'hidden' }}>
           {photo ? (it.photo_crop ? <CropImg url={photo} box={it.photo_crop} alt="Your photo (from a binder page)" /> : <img src={photo} alt="Your photo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />) : <Loader size={14} className="spin ink-faint" />}
@@ -496,6 +620,7 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
             placeholder={it.imported_from_ebay_at ? 'eBay description' : 'Written from the card\'s details (as on eBay). Type here to replace it.'}
             onChange={(e) => field('description', e.target.value)} onBlur={() => (d.description || '') !== (it.description || '') && commit({ description: d.description })} />
           <div className="ink-faint" style={{ fontSize: '0.65rem' }}>Edits here go to eBay when you tap "Update on eBay". Change the price in Prices.</div>
+          {(whatnotOn || Number(it.quantity ?? 1) !== 1) && <QtyField it={it} onQuantity={mp_.onQuantity} />}
         </div>
       )}
       {it.status === 'approved' && <PublishStatus it={it} />}
@@ -531,6 +656,7 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
             {it.suggested_price != null && Number(d.price) !== Number(it.suggested_price) && <button className="btn-ghost" style={{ padding: '3px 6px', fontSize: '0.65rem' }} onClick={() => { field('price', it.suggested_price); commit({ price: it.suggested_price }); }}>Use {money(it.suggested_price)}</button>}
             <span className="ink-faint" title={it.price_source || ''}>market {money(it.market_price)}</span>
           </div>
+          {(whatnotOn || Number(it.quantity ?? 1) !== 1) && <QtyField it={it} onQuantity={mp_.onQuantity} />}
           <div style={{ gridColumn: 'span 2', display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.75rem', flexWrap: 'wrap' }}>
             <span className="ink-faint">Cost $</span>
             <input className="bg-input" style={{ ...inp, width: 90 }} type="number" step="0.01" min="0" placeholder="paid" value={d.cost_basis ?? ''} onChange={(e) => field('cost_basis', e.target.value)}
@@ -547,6 +673,69 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
         <button className="btn-ghost" disabled={busy || it.status === 'approved'} onClick={onRetry} title="Read the photo again (costs another AI call)" style={{ padding: '6px 10px' }}><RefreshCw size={13} /></button>
         <button className="btn-ghost" disabled={['checking', 'publishing'].includes(it.publish_state)} onClick={() => onDiscard(it)} title="Discard" style={{ padding: '6px 10px' }}><X size={13} /></button>
       </div>}
+    </div>
+  );
+}
+
+// Where the card is listed: a chip per marketplace, and "List on Whatnot".
+function MarketChips({ it, listings, whatnotOn, mp_ }) {
+  const chips = chipsFor(listings);
+  const tone = { live: ['var(--good)', 'var(--ink)'], warn: ['var(--warn)', 'var(--warn)'], sold: ['var(--good)', 'var(--good)'], ended: ['var(--line)', 'var(--ink-faint)'], bad: ['var(--bad)', 'var(--bad)'] };
+  const wnNow = currentListings(listings).find((l) => l.marketplace === 'whatnot');
+  const canList = whatnotOn && !['active', 'ending'].includes(wnNow?.status) && Number(it.quantity ?? 1) > 0 && !it.photo_crop;
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+        {chips.map((c) => (
+          <button key={c.id} type="button" className="btn-ghost" onClick={() => mp_.onChip?.(listings.find((l) => l.id === c.id))}
+            disabled={!c.live && !c.url} aria-label={c.live && c.marketplace === 'whatnot' ? `${c.text}: change or end` : c.text}
+            style={{ padding: '3px 8px', fontSize: '0.7rem', borderColor: tone[c.tone][0], color: tone[c.tone][1], whiteSpace: 'nowrap' }}>{c.text}</button>
+        ))}
+        {canList && <button type="button" className="btn-primary" onClick={mp_.onList} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>List on Whatnot</button>}
+      </div>
+      {wnNow?.status === 'failed' && wnNow.last_error && (
+        <div className="accent-red" style={{ fontSize: '0.72rem', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, minWidth: 140 }}>{wnNow.last_error}</span>
+          {canList && <button type="button" className="btn-ghost" onClick={mp_.onList} style={{ padding: '3px 8px', fontSize: '0.7rem' }}>Try again</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// What happened when the card sold on one marketplace (top line of the card).
+function SaleNote({ it, listings, onEnd }) {
+  const s = saleSentence(it, listings);
+  if (!s) return null;
+  const color = s.tone === 'bad' ? 'var(--bad)' : s.tone === 'ok' ? 'var(--good)' : 'var(--warn)';
+  return (
+    <div role="status" style={{ fontSize: '0.75rem', padding: 8, border: `1px solid ${color}`, color, display: 'grid', gap: 6 }}>
+      <span>{s.text}</span>
+      {(s.endButtons.length > 0 || s.orders.length > 1) && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {s.endButtons.map((b) => <button key={b.listingId} type="button" className="btn-primary" onClick={() => onEnd?.(listings.find((l) => l.id === b.listingId))} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>{b.label}</button>)}
+          {s.tone === 'bad' && s.orders.map((o, i) => <a key={i} href={o.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.7rem', color }}>{o.marketplace === 'ebay' ? 'eBay' : 'Whatnot'} order <ExternalLink size={10} /></a>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// How many of this card the seller has (default 1).
+function QtyField({ it, onQuantity }) {
+  const [v, setV] = useState(String(it.quantity ?? 1));
+  useEffect(() => { setV(String(it.quantity ?? 1)); }, [it.quantity]);
+  const commit = async () => {
+    if (String(it.quantity ?? 1) === v.trim()) return;
+    const ok = await onQuantity?.(Number(v.trim()));
+    if (!ok) setV(String(it.quantity ?? 1));
+  };
+  return (
+    <div style={{ gridColumn: 'span 2', display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.75rem' }}>
+      <span className="ink-faint">Quantity</span>
+      <input className="bg-input" aria-label="Quantity" style={{ padding: '6px 8px', fontSize: '0.8rem', width: 70 }} type="number" min="1" max="999" step="1" inputMode="numeric"
+        value={v} onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+      {Number(it.quantity) === 0 && <span className="accent-amber">sold out</span>}
     </div>
   );
 }
@@ -908,7 +1097,7 @@ function ListingSetup({ s, set }) {
       <h3 className="display-font" style={{ margin: 0, fontSize: '1.1rem' }}>EBAY LISTING SETUP</h3>
       <div className="ink-dim" style={{ fontSize: '0.75rem' }}>New listings copy the setup of your own newest card listings (Yu-Gi-Oh!, One Piece, Lorcana and other games borrow it, with their own game details): category, condition codes, item details, ship-from location, return and payment policies, and Best Offer %.</div>
       {state.loading ? <Loader size={14} className="spin ink-faint" /> : !state.connected ? (
-        <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Connect your eBay account in Listings & Prices → eBay account first.</div>
+        <div className="accent-amber" style={{ fontSize: '0.8rem' }}>Connect your eBay account in Listings & Prices → Marketplaces first.</div>
       ) : (
         <>
           {t ? (
@@ -942,7 +1131,7 @@ function ListingSetup({ s, set }) {
         <div><label htmlFor="promo-pct">Promoted Listings ad rate %</label><input id="promo-pct" className="bg-input" type="number" step="0.1" min="0" max="20" value={s.snapPromotePct ?? 2} onChange={(e) => set('snapPromotePct', e.target.value === '' ? 0 : Number(e.target.value))} /></div>
         <div className="ink-faint" style={{ gridColumn: '1 / -1', fontSize: '0.7rem' }}>
           Best Offer: offers at {100 - (Number(s.snapBestOfferPct) || 10)}% of the price or more are accepted automatically, lower ones declined (a $10.00 card accepts $9.00 and up). Turn it off per listing in the Repricer.
-          {' '}Promotion: each new listing joins your CardDesk Promoted Listings campaign; eBay charges the ad rate only when a promoted listing sells. 0 turns it off. The first time, reconnect eBay (Listings & Prices → eBay account) to allow promotions.
+          {' '}Promotion: each new listing joins your CardDesk Promoted Listings campaign; eBay charges the ad rate only when a promoted listing sells. 0 turns it off. The first time, reconnect eBay (Listings & Prices → Marketplaces) to allow promotions.
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
