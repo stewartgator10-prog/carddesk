@@ -2,9 +2,9 @@
 // One snap: photo -> Claude read -> catalog match -> price/title/review flags -> saved row,
 // with every Claude call written to the API fee log. Dependencies are injectable for tests.
 import { readCard, fetchImage, SNAP_MODELS } from './card-vision.js';
-import { lookupCard } from './card-catalog.js';
+import { lookupCard, resolveCatalog } from './card-catalog.js';
 import { ebayMedianFor } from './market.js';
-import { applyIdentification, scoreTrial, titleNumber, SNAP_DEFAULTS } from './snap-logic.js';
+import { applyIdentification, scoreTrial, titleNumber, SNAP_DEFAULTS, CATALOG_GAMES } from './snap-logic.js';
 import { usageRow, logUsage, checkBudget, costOf } from './ai-usage.js';
 import { autoCropOnSnap } from './snap-photos.js';
 
@@ -46,11 +46,50 @@ async function readAndLog({ db, userId, model, image, purpose, snapItemId, deps 
   }
 }
 
+// ---------- which model reads the card ----------
+// Haiku reads Jackson's cards as accurately as Opus at about 1/28th of the cost (model trial,
+// Nov 2026). Opus is kept for the cards where it still matters.
+export const FAST_MODEL = 'claude-haiku-5-5';
+export function escalationReason(read, catalog) {
+  if (!read?.is_trading_card) return 'not_a_card';
+  if (!(Number(read.confidence) >= 0.8)) return 'low_confidence';
+  if (!/^english$/i.test(read.language || 'English')) return 'not_english';
+  if (CATALOG_GAMES.includes(read.game) && !catalog) return 'no_catalog_match';
+  if (read.game === 'other') return 'other_game';
+  return null;
+}
+export const autoRoutes = (settings) => settings?.snapAutoRoute !== false && settings?.snapModel !== FAST_MODEL;
+
+// Reads a card photo and matches it to the catalog. With auto routing: Haiku first, then the chosen
+// model (Opus) only if escalationReason says so. Every call is logged to the fee tracker.
+export async function readCardRouted({ db, userId, settings, image, purpose, snapItemId = null, deps = {} }) {
+  const lookup = { lookup: deps.lookupCard || lookupCard };
+  const auto = autoRoutes(settings);
+  const first = auto ? FAST_MODEL : settings.snapModel;
+  const a = await readAndLog({ db, userId, model: first, image, purpose, snapItemId, deps });
+  let { read, catalog } = await resolveCatalog(a.read, lookup);
+  let out = { read, catalog, model: first, cost: a.cost || 0, latencyMs: a.latencyMs || 0, usage: { ...(a.usage || {}) }, route: null };
+  const why = auto ? escalationReason(read, catalog) : null;
+  if (!why) return out;
+  out.route = { first, escalated: why };
+  try {
+    const b = await readAndLog({ db, userId, model: settings.snapModel, image, purpose, snapItemId, deps });
+    ({ read, catalog } = await resolveCatalog(b.read, lookup));
+    const sum = (k) => (Number(a.usage?.[k]) || 0) + (Number(b.usage?.[k]) || 0);
+    out = { ...out, read, catalog, model: settings.snapModel, cost: out.cost + (b.cost || 0), latencyMs: out.latencyMs + (b.latencyMs || 0),
+      usage: { input_tokens: sum('input_tokens'), output_tokens: sum('output_tokens') } };
+  } catch (err) {
+    if (err.code === 'NO_API_KEY') throw err;
+    console.error('escalation failed, keeping the first read', err.message);   // the first read is still usable
+    out.route.failed = String(err.message).slice(0, 120);
+  }
+  return out;
+}
+
 export async function identifySnapItem({ db, userId, item, deps = {} }) {
   const settings = await loadSnapSettings(db, userId);
   const budget = await checkBudget(db, userId, settings);
   if (!budget.ok) throw new BudgetError(budget);
-  const model = settings.snapModel;
 
   await db.from('snap_items').update({ status: 'identifying', error: null }).eq('id', item.id).eq('user_id', userId);
   try {
@@ -58,8 +97,9 @@ export async function identifySnapItem({ db, userId, item, deps = {} }) {
     if (error || !blob) throw new Error(`Couldn't open the photo: ${error?.message || 'missing'}`);
     const image = { base64: Buffer.from(await blob.arrayBuffer()).toString('base64'), mediaType: blob.type || 'image/jpeg' };
 
-    const r = await readAndLog({ db, userId, model, image, purpose: 'snap_identify', snapItemId: item.id, deps });
-    const catalog = await (deps.lookupCard || lookupCard)(r.read).catch((e) => { console.error('catalog lookup', e.message); return null; });
+    const routed = await readCardRouted({ db, userId, settings, image, purpose: 'snap_identify', snapItemId: item.id, deps });
+    const r = { read: routed.route ? { ...routed.read, route: routed.route } : routed.read, cost: routed.cost };
+    const catalog = routed.catalog;
     const duplicateItemId = await findDuplicate(db, userId, r.read).catch(() => null);
     // No usable catalog price (another game or language, or a printing the catalog lacks): use eBay's middle price.
     let ebayMedian = null;
@@ -68,7 +108,7 @@ export async function identifySnapItem({ db, userId, item, deps = {} }) {
       const acct = await db.from('ebay_accounts').select('ebay_username').eq('user_id', userId).maybeSingle();
       ebayMedian = await ebayMedianFor(r.read, { ownSeller: acct.data?.ebay_username || null, deps }).catch((e) => { console.error('ebay median', e.message); return null; });
     }
-    const patch = { ...applyIdentification({ read: r.read, catalog, settings, duplicateItemId, ebayMedian }), model, identified_at: new Date().toISOString() };
+    const patch = { ...applyIdentification({ read: r.read, catalog, settings, duplicateItemId, ebayMedian }), model: routed.model, identified_at: new Date().toISOString() };
     const { error: upErr } = await db.from('snap_items').update(patch).eq('id', item.id).eq('user_id', userId);
     if (upErr) throw new Error(upErr.message);
     // Straighten and crop the photo so the card fills it, from the corners the same read found.
@@ -108,21 +148,23 @@ export async function runTrialCase({ db, userId, trialId, model, listing, deps =
   let row;
   try {
     const image = await (deps.fetchImage || fetchImage)(imageUrl);
-    const r = await readAndLog({ db, userId, model, image, purpose: 'model_trial', snapItemId: null, deps });
-    const catalog = await (deps.lookupCard || lookupCard)(r.read).catch(() => null);
+    // 'auto' is the Haiku-first routing; a model name runs that model alone.
+    const arm = model === 'auto' ? { ...settings, snapAutoRoute: true, snapModel: SNAP_DEFAULTS.snapModel } : { ...settings, snapAutoRoute: false, snapModel: model };
+    const r = await readCardRouted({ db, userId, settings: arm, image, purpose: 'model_trial', deps });
+    const catalog = r.catalog;
     row = {
       ...base,
-      extraction: r.read,
+      extraction: r.route ? { ...r.read, route: r.route } : r.read,
       catalog_source: catalog?.source ?? null, catalog_id: catalog?.id ?? null, catalog_name: catalog?.name ?? null,
       catalog_number: catalog?.number ?? null, market_price: catalog?.marketPrice ?? null,
       ...scoreTrial({ title: listing.title, read: r.read, catalog }),
-      latency_ms: r.latencyMs, cost_usd: r.cost ?? costOf(model, r.usage) ?? 0,
+      latency_ms: r.latencyMs, cost_usd: r.cost ?? costOf(r.model, r.usage) ?? 0,
       input_tokens: r.usage?.input_tokens ?? null, output_tokens: r.usage?.output_tokens ?? null,
       error: null,
     };
   } catch (err) {
     if (err.code === 'NO_API_KEY' || err.code === 'BUDGET') throw err;
-    row = { ...base, error: String(err.message).slice(0, 300), cost_usd: err.usage ? costOf(model, err.usage) ?? 0 : 0 };
+    row = { ...base, error: String(err.message).slice(0, 300), cost_usd: err.usage ? costOf(model === 'auto' ? FAST_MODEL : model, err.usage) ?? 0 : 0 };
   }
   const { error } = await db.from('model_trial_results').upsert(row, { onConflict: 'user_id,trial_id,model,item_id' });
   if (error) throw new Error(error.message);

@@ -16,6 +16,7 @@ export const CardRead = z.object({
   is_trading_card: z.boolean(),
   game: z.enum(['pokemon', 'mtg', 'one_piece', 'lorcana', 'yugioh', 'sports', 'other']),
   card_name: z.string(),
+  printed_name: z.string().nullable(),
   collector_number: z.string().nullable(),
   set_name: z.string().nullable(),
   set_code: z.string().nullable(),
@@ -43,7 +44,8 @@ const CORNERS_RULE = `- card_corners: where the card's four corners are in the p
 export const SYSTEM_PROMPT = `You identify trading cards from photos for a card seller who lists them on eBay.
 Report only what you can read or clearly see. Never invent a value: use null when it isn't visible.
 
-- card_name: the name exactly as printed, including suffixes such as "ex", "V", "VMAX", "GX" and prefixes such as "Hisuian" or "Radiant".
+- card_name: the card's name in English, including suffixes such as "ex", "V", "VMAX", "GX" and prefixes such as "Hisuian" or "Radiant". For a card printed in another language (Japanese, Chinese, Korean and so on), give its official English name, for example "Electivire ex" for エレキブルex or "Professor's Research" for 博士の研究. Never put non-English characters in card_name. If you don't know the English name, give your best English reading and lower confidence.
+- printed_name: for a card not printed in English, the name exactly as printed in its own language; otherwise null.
 - collector_number: exactly as printed, keeping leading zeros and the set total, for example "035/193", "TG05/TG30", "SWSH050" or "216". Pokémon prints it bottom left or bottom right; Magic prints it bottom left above the set code.
 - set_code: the printed set code if there is one (Magic: three or four letters bottom left such as "SPM" or "W17"; Pokémon: the small regulation/set code if legible). set_name only if you are sure which set it is.
 - game: "yugioh" for Yu-Gi-Oh!, "one_piece" for the One Piece Card Game, "lorcana" for Disney Lorcana, "sports" for sports cards, "other" for any other card game.

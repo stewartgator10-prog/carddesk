@@ -386,3 +386,16 @@ export async function lookupCard(read, fetchImpl = fetch) {
   const fn = LOOKUPS[read.game];
   return fn ? fn(read, fetchImpl) : null;
 }
+
+// The AI sometimes files newer Magic cards (crossover sets such as Spider-Man or Final Fantasy) under
+// "other". If the printed set code and number are a real Magic card with the same name, it is Magic.
+// Returns { read, catalog } with read.game corrected.
+export async function resolveCatalog(read, { lookup = lookupCard, fetchImpl = fetch } = {}) {
+  let catalog = await lookup(read, fetchImpl).catch((e) => { console.error('catalog lookup', e.message); return null; });
+  if (!catalog && read?.game === 'other' && read.set_code && read.collector_number && read.card_name) {
+    const asMtg = { ...read, game: 'mtg' };
+    const hit = await lookupMtg(asMtg, fetchImpl).catch(() => null);
+    if (hit && hit.matchLevel === 'exact') return { read: { ...asMtg, game_name: null }, catalog: hit };
+  }
+  return { read, catalog };
+}

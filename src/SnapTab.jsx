@@ -14,6 +14,9 @@ const fee = (n) => (n == null ? '—' : Number(n) < 0.01 ? `$${Number(n).toFixed
 const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const OPEN = ['uploaded', 'identifying', 'ready', 'needs_review', 'failed', 'approved', 'listed'];
 const DONE = ['approved', 'listed'];
+// The model trial compares each model alone and the Haiku-first routing.
+const ARM_LABELS = { ...MODEL_LABELS, auto: 'Auto: Haiku, Opus when needed' };
+const ROUTE_REASONS = { not_a_card: 'not sure it was a card', low_confidence: 'unsure of the card', not_english: 'not in English', no_catalog_match: 'no catalog match', other_game: 'other game' };
 // Editing any of these after the eBay check means the check no longer describes the listing.
 const LISTING_FIELDS = ['photo_path', 'title', 'price', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction', 'description'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
@@ -428,7 +431,7 @@ function SnapCard({ it, photo, photoUrls = {}, photoBusy = null, photo_ = {}, on
     <div className="bg-card" style={{ padding: 12, display: 'grid', gap: 8, borderColor: it.status === 'needs_review' || it.status === 'failed' ? color : undefined }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem' }}>
         <span style={{ color, fontWeight: 700, letterSpacing: '0.1em' }}>{busy && <Loader size={11} className="spin" />} {label}</span>
-        <span className="ink-faint">{it.model ? (MODEL_LABELS[it.model] || it.model) : ''}{it.confidence != null ? ` · ${Math.round(it.confidence * 100)}% sure` : ''}</span>
+        <span className="ink-faint" title={it.extraction?.route ? `Read by Haiku first, then ${MODEL_LABELS[it.model] || it.model}: ${ROUTE_REASONS[it.extraction.route.escalated] || it.extraction.route.escalated}` : undefined}>{it.model ? (it.extraction?.route && !it.extraction.route.failed ? `Haiku → ${(MODEL_LABELS[it.model] || it.model).replace('Claude ', '')}` : (MODEL_LABELS[it.model] || it.model)) : ''}{it.confidence != null ? ` · ${Math.round(it.confidence * 100)}% sure` : ''}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
         <div style={{ aspectRatio: '5 / 7', background: 'var(--well)', display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 0, overflow: 'hidden' }}>
@@ -636,6 +639,7 @@ function FeePanel({ usage, budget, onReload }) {
 }
 
 function TrialPanel({ settings, setSettings, onUsage }) {
+  const autoOn = settings.snapAutoRoute !== false && settings.snapModel !== 'claude-haiku-5-5';
   const [rows, setRows] = useState([]);
   const [trialId, setTrialId] = useState(null);
   const [running, setRunning] = useState(null); // { done, total }
@@ -656,8 +660,8 @@ function TrialPanel({ settings, setSettings, onUsage }) {
     const plan = await res.json().catch(() => ({}));
     if (!res.ok) { setErr(plan.error || `Couldn't start (${res.status})`); return; }
     if (!plan.items?.length) { setErr('No single-card listings with photos to test on. Sync your eBay listings first.'); return; }
-    const est = plan.models.map((m) => `${MODEL_LABELS[m]} about ${fee(plan.estimate[m])}`).join(', ');
-    if (!(await askConfirm(`Run ${plan.items.length} of your listing photos through both models?\n\nEstimated cost: ${est}.\n\nBilled to your Anthropic API key.`, { title: 'Model trial', confirmLabel: 'Run the trial' }))) return;
+    const est = plan.models.map((m) => `${ARM_LABELS[m]} about ${fee(plan.estimate[m])}`).join(', ');
+    if (!(await askConfirm(`Run ${plan.items.length} of your listing photos through ${plan.models.length === 2 ? 'both models' : 'each option'}?\n\nEstimated cost: ${est}.\n\nBilled to your Anthropic API key.`, { title: 'Model trial', confirmLabel: 'Run the trial' }))) return;
     const id = `t${Date.now()}`;
     setTrialId(id); setRows([]); stop.current = false;
     const jobs = plan.items.flatMap((it) => plan.models.map((m) => ({ model: m, itemId: it.item_id })));
@@ -682,7 +686,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
     for (const r of rows) { if (!m.has(r.item_id)) m.set(r.item_id, { title: r.expected_title, image: r.image_url, listed: r.listed_price, market: r.market_price }); m.get(r.item_id)[r.model] = r; }
     return [...m.values()];
   }, [rows]);
-  const misses = byItem.filter((x) => Object.keys(MODEL_LABELS).some((k) => x[k] && (x[k].error || !x[k].correct)));
+  const misses = byItem.filter((x) => Object.keys(ARM_LABELS).some((k) => x[k] && (x[k].error || !x[k].correct)));
   const ratios = byItem.map((x) => Number(x.listed) / Number(x.market)).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
   const medianRatio = ratios.length ? ratios[Math.floor(ratios.length / 2)] : null;
 
@@ -691,7 +695,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 className="display-font" style={{ margin: 0, fontSize: '1.3rem' }}>MODEL TRIAL</h2>
-          <div className="ink-dim" style={{ fontSize: '0.75rem' }}>Runs up to 60 of your own eBay listing photos through both models and checks each answer against your listing title.</div>
+          <div className="ink-dim" style={{ fontSize: '0.75rem' }}>Runs up to 60 of your own eBay listing photos through Opus, Haiku, and Auto (Haiku first, Opus only for hard cards), and checks each answer against your listing title.</div>
         </div>
         {running
           ? <button className="btn-ghost" onClick={() => { stop.current = true; }} style={{ padding: '8px 14px' }}><Loader size={14} className="spin" /> {running.done}/{running.total} · Stop</button>
@@ -707,15 +711,15 @@ function TrialPanel({ settings, setSettings, onUsage }) {
               </div>
               {summary.map((m) => (
                 <div key={m.model} className="grid-row" style={{ gridTemplateColumns: '170px repeat(5, 1fr) 90px 90px 70px 120px' }}>
-                  <div style={{ fontWeight: 600 }}>{MODEL_LABELS[m.model] || m.model}<div className="ink-faint" style={{ fontSize: '0.65rem' }}>{m.cards} cards{m.errors ? ` · ${m.errors} errors` : ''}</div></div>
+                  <div style={{ fontWeight: 600 }}>{ARM_LABELS[m.model] || m.model}<div className="ink-faint" style={{ fontSize: '0.65rem' }}>{m.cards} cards{m.errors ? ` · ${m.errors} errors` : ''}</div></div>
                   <div style={{ fontWeight: 700 }} className={m.correct >= 0.9 ? 'accent-green' : 'accent-amber'}>{pct(m.correct)}</div>
                   <div>{pct(m.name)}</div><div>{pct(m.number)}</div><div>{pct(m.set)}</div><div>{pct(m.catalog)}</div>
                   <div style={{ textAlign: 'right' }}>{fee(m.costPerCard)}</div>
                   <div style={{ textAlign: 'right' }}>{fee(m.totalCost)}</div>
                   <div style={{ textAlign: 'right' }} className="ink-dim">{m.medianLatencyMs ? `${(m.medianLatencyMs / 1000).toFixed(1)}s` : '—'}</div>
-                  <div style={{ textAlign: 'right' }}>{settings.snapModel === m.model
+                  <div style={{ textAlign: 'right' }}>{(m.model === 'auto' ? autoOn : !autoOn && settings.snapModel === m.model)
                     ? <span className="accent-green" style={{ fontSize: '0.7rem' }}>In use</span>
-                    : <button className="btn-ghost" onClick={() => setSettings({ ...settings, snapModel: m.model })} style={{ padding: '4px 8px', fontSize: '0.7rem' }}>Use this model</button>}</div>
+                    : <button className="btn-ghost" onClick={() => setSettings(m.model === 'auto' ? { ...settings, snapAutoRoute: true, snapModel: 'claude-opus-5-5' } : { ...settings, snapAutoRoute: false, snapModel: m.model })} style={{ padding: '4px 8px', fontSize: '0.7rem' }}>Use this</button>}</div>
                 </div>
               ))}
             </div>
@@ -728,14 +732,14 @@ function TrialPanel({ settings, setSettings, onUsage }) {
             <div style={{ borderTop: '1px solid var(--line)' }}>
               <div className="ink-faint" style={{ fontSize: '0.7rem', padding: '10px 20px', letterSpacing: '0.1em' }}>CARDS A MODEL GOT WRONG ({misses.length})</div>
               {misses.map((x, i) => (
-                <div key={i} className="grid-row" style={{ gridTemplateColumns: '48px 1.4fr 1fr 1fr', fontSize: '0.75rem', padding: '8px 20px' }}>
+                <div key={i} className="grid-row" style={{ gridTemplateColumns: '48px 1.4fr repeat(3, 1fr)', fontSize: '0.75rem', padding: '8px 20px' }}>
                   <img src={x.image} alt="" style={{ width: 44, height: 60, objectFit: 'contain', background: 'var(--well)' }} />
                   <div>{x.title}</div>
-                  {Object.keys(MODEL_LABELS).map((k) => {
+                  {Object.keys(ARM_LABELS).filter((k) => byItem.some((y) => y[k])).map((k) => {
                     const r = x[k];
                     if (!r) return <div key={k} />;
                     const e = r.extraction || {};
-                    return <div key={k} className={r.correct ? 'ink-dim' : 'accent-red'}><span className="ink-faint">{MODEL_LABELS[k].replace('Claude ', '')}: </span>{r.error || `${e.card_name || '?'} ${e.collector_number || ''}`}</div>;
+                    return <div key={k} className={r.correct ? 'ink-dim' : 'accent-red'}><span className="ink-faint">{(k === 'auto' ? 'Auto' : ARM_LABELS[k].replace('Claude ', ''))}: </span>{r.error || `${e.card_name || '?'} ${e.collector_number || ''}`}</div>;
                   })}
                 </div>
               ))}
@@ -756,7 +760,11 @@ function SnapSettings({ s, settings, setSettings }) {
         <select className="bg-input" value={s.snapModel} onChange={(e) => set('snapModel', e.target.value)}>
           {Object.entries(MODEL_LABELS).map(([k, l]) => <option key={k} value={k}>{l} (${MODEL_PRICES[k].input} / ${MODEL_PRICES[k].output} per M tokens)</option>)}
         </select>
-        <div className="ink-faint" style={{ fontSize: '0.7rem', marginTop: 4 }}>Run the model trial to compare accuracy and cost on your own cards.</div></div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '8px 0 0', fontSize: '0.8rem', textTransform: 'none', letterSpacing: 0, color: 'var(--ink)' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={s.snapAutoRoute !== false && s.snapModel !== 'claude-haiku-5-5'} disabled={s.snapModel === 'claude-haiku-5-5'} onChange={(e) => set('snapAutoRoute', e.target.checked)} />
+          Read with Haiku first; use {MODEL_LABELS[s.snapModel] || s.snapModel} only for hard cards
+        </label>
+        <div className="ink-faint" style={{ fontSize: '0.7rem', marginTop: 4 }}>Hard cards: not in English, unsure of the card, no catalog match, or another game. On your cards Haiku was as accurate as Opus at a small fraction of the cost. Run the model trial to compare on your own cards.</div></div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
         <div><label>Markup over market %</label><input className="bg-input" type="number" step="1" value={s.snapMarkupPct} onChange={(e) => set('snapMarkupPct', e.target.value === '' ? 0 : Number(e.target.value))} /></div>
         <div><label>Minimum price $</label><input className="bg-input" type="number" step="0.01" value={s.snapMinPrice} onChange={(e) => set('snapMinPrice', e.target.value === '' ? 0 : Number(e.target.value))} /></div>
@@ -833,7 +841,7 @@ function AccessKeys({ url }) {
     if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
     return data;
   };
-  const load = useCallback(async () => { try { setKeys((await call('GET')).keys); } catch (e) { setErr(e.message); setKeys([]); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(async () => { try { setKeys((await call('GET')).keys || []); } catch (e) { setErr(e.message); setKeys([]); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
   async function create() {
     setBusy(true); setErr(null); setCopied(false);
