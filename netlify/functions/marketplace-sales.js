@@ -14,7 +14,7 @@ export default async (req) => {
   try {
     return json(200, await checkSalesNow(getSupabaseAdmin(), auth.user.id));
   } catch (err) {
-    if (isMarketplaceError(err)) return json(err.status || httpStatusFor(err), { error: err.sellerMessage, code: err.code });
+    if (isMarketplaceError(err)) return json(httpStatusFor(err), { error: err.sellerMessage, code: err.code });
     console.error('marketplace-sales', err.message);
     return json(500, { error: 'Something went wrong. Try again in a minute.' });
   }

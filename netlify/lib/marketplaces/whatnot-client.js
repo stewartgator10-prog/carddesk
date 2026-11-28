@@ -19,22 +19,37 @@ const nextSlot = new Map();   // seller key -> earliest time the next request ma
 
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Whatnot's own words for a refused request. CONFIRM (10): the error body format for 400/403/409/422.
-// FastAPI-style { detail: "..." | [{ loc, msg }] } is what the OpenAPI spec documents for 422.
+// Whatnot's own words for a refused request. The spec documents one error body, for 422:
+// HTTPValidationError { detail: [{ loc, msg, type }] }. 401/403/404/409 have no documented body; a
+// merchandising 422 for a product that isn't ready "lists each field to fix" in `errors`. Anything
+// else readable (a string detail or message) is used as is.
 export function whatnotMessage(body) {
-  if (!body || typeof body !== 'object') return typeof body === 'string' ? body.slice(0, 200) : '';
+  if (!body || typeof body !== 'object') return typeof body === 'string' && !/^\s*</.test(body) ? body.slice(0, 200) : '';
   const d = body.detail ?? body.message ?? body.error ?? body.errors;
   if (typeof d === 'string') return d.slice(0, 200);
   if (Array.isArray(d)) {
     return d.map((x) => {
       if (typeof x === 'string') return x;
-      const where = Array.isArray(x?.loc) ? x.loc.filter((p) => p !== 'body').join('.') : '';
-      const what = x?.msg || x?.message || '';
+      const where = Array.isArray(x?.loc) ? x.loc.filter((p) => p !== 'body').join('.') : x?.field || '';
+      const what = x?.msg || x?.message || x?.code || '';
       return where && what ? `${where}: ${what}` : what || where;
     }).filter(Boolean).join('; ').slice(0, 200);
   }
   if (d && typeof d === 'object') return whatnotMessage(d);
   return '';
+}
+
+// A refused request as an error the seller can act on. Whatnot's HTTP status is kept in `detail`
+// for logs only: our endpoints answer with their own status for the error's code (httpStatusFor).
+export function errorFor(status, said = '') {
+  const d = { detail: { whatnotStatus: status } };
+  if (status === 401) return new MarketplaceError('reconnect', 'Whatnot stopped accepting your token, so we can\'t see Whatnot sales. Paste a new one in Marketplaces.', d);
+  if (status === 403) return new MarketplaceError('missing_scope', `Your Whatnot token is missing a permission this needs${said ? ` (${said})` : ''}. Make a new token with every box from the Marketplaces page ticked.`, d);
+  if (status === 404) return new MarketplaceError('not_found', 'Whatnot can\'t find that listing any more.', d);
+  if (status === 409) return new MarketplaceError('rejected', `Whatnot can't do that to this listing right now${said ? ` (${said})` : ''}. Check it on Whatnot.`, d);
+  if (status === 429) return new MarketplaceError('rate_limited', 'Whatnot is busy, try again in a minute.', d);
+  if (status >= 500) return new MarketplaceError('unavailable', 'Whatnot isn\'t answering right now. Try again in a few minutes.', d);
+  return new MarketplaceError('rejected', said ? `Whatnot said: ${said}` : 'Whatnot turned that down. Check the card\'s details and try again.', d);
 }
 
 function retryAfterMs(res) {
@@ -83,13 +98,7 @@ export function whatnotClient({ token, key = 'default', fetchImpl = fetch, sleep
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = text; }
       if (res.ok || allow.includes(res.status)) return { status: res.status, data };
-      const said = whatnotMessage(data);
-      if (res.status === 401) throw new MarketplaceError('reconnect', 'Whatnot stopped accepting your token, so we can\'t see Whatnot sales. Paste a new one in Marketplaces.', { status: 401 });
-      if (res.status === 403) throw new MarketplaceError('missing_scope', `Your Whatnot token is missing a permission this needs${said ? ` (${said})` : ''}. Make a new token with every box from the Marketplaces page ticked.`, { status: 403 });
-      if (res.status === 404) throw new MarketplaceError('not_found', 'Whatnot can\'t find that listing any more.', { status: 404 });
-      if (res.status === 429) throw new MarketplaceError('rate_limited', 'Whatnot is busy, try again in a minute.', { status: 429 });
-      if (res.status >= 500) throw new MarketplaceError('unavailable', 'Whatnot isn\'t answering right now. Try again in a few minutes.', { status: res.status });
-      throw new MarketplaceError('rejected', `Whatnot said: ${said || `the request was refused (${res.status})`}`, { status: res.status });
+      throw errorFor(res.status, whatnotMessage(data));
     }
   }
 

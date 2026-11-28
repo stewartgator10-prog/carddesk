@@ -32,7 +32,7 @@ export default async (req) => {
     if (body.action === 'settings') return json(200, { marketplace: await saveMarketplaceSettings(db, userId, { marketplace: String(body.marketplace || ''), shippingProfileId: body.shippingProfileId ?? null }) });
     return json(400, { error: 'Unknown action.' });
   } catch (err) {
-    if (isMarketplaceError(err)) return json(err.status || httpStatusFor(err), { error: err.sellerMessage, code: err.code });
+    if (isMarketplaceError(err)) return json(httpStatusFor(err), { error: err.sellerMessage, code: err.code });
     console.error('marketplaces', err.message);
     return json(500, { error: 'Something went wrong. Try again in a minute.' });
   }

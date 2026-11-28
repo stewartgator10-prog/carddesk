@@ -1,9 +1,18 @@
 // netlify/lib/marketplaces/whatnot.js
 // The Whatnot adapter: connect with a seller's personal access token, list a card as Buy It Now in
 // their Whatnot shop, change its price or quantity, end it, and read sales.
-// Request shapes follow the saved OpenAPI spec (docs/marketplaces/whatnot-api/openapi.json). The
-// Seller API is beta and none of this has been run against a live shop yet: every `CONFIRM:` below
-// must be checked once with the owner's go-ahead before go-live (spec section 5).
+// Every call follows the saved OpenAPI spec (docs/marketplaces/whatnot-api/openapi.json, Seller API
+// v2, beta). What the spec leaves open is listed in docs/marketplaces/whatnot.md ("Still to check on
+// a live shop") and marked `CONFIRM:` below.
+//
+// Listing a card is four calls (the spec's "Products" guide):
+//   1. POST /products                      title, description, external_id (our card id), category,
+//                                          attributes, media, dimension_profile, hazardous_material
+//   2. GET  /products/{id}/variants        the one variant Whatnot made (a card has no options)
+//   3. PATCH /products/{id}/variants       { variants: [{ id, price: Money, sku, external_id }] }
+//      POST /inventory/set                 { items: [{ variant_id, quantity, idempotency_key }] }
+//   4. POST /merchandising/products/{id}   { transaction_type: 'buy_it_now', reserve_for_live: false }
+//                                          (not reserved for live = for sale in the profile shop)
 import crypto from 'node:crypto';
 import { whatnotClient } from './whatnot-client.js';
 import { MarketplaceError } from './errors.js';
@@ -11,29 +20,14 @@ import { open } from '../secret-box.js';
 import { snapSku } from '../ebay-listing.js';
 import { listingPhotoPaths, MAX_LISTING_PHOTOS, LISTABLE_GAMES } from '../snap-logic.js';
 import { buildDescription } from '../listing-copy.js';
+import { categoryFor, categoryIdFor, productAttributes } from './whatnot-details.js';
 
 import { TOKEN_PREFIX, APP_TOKEN_PREFIX, WHATNOT_SCOPES, TOKEN_PAGE, CONDITION_LABELS } from './whatnot-info.js';
 
-export { TOKEN_PREFIX, APP_TOKEN_PREFIX, WHATNOT_SCOPES, TOKEN_PAGE, CONDITION_LABELS };
-export const MAX_WHATNOT_PHOTOS = MAX_LISTING_PHOTOS;   // CONFIRM (2): Whatnot's photo limit
-const PAGE = 50;                                         // Whatnot's maximum page size
-
-// CONFIRM (2, 12): Whatnot has no condition field on a product; condition is a category attribute.
-// Fill in the attribute id from the taxonomy; until then condition goes in the description only.
-export const CONDITION_ATTRIBUTE_ID = null;
-
-// CONFIRM (12): Whatnot taxonomy ids for single cards per game, from Whatnot-Inc/product-taxonomy
-// data/taxonomy.json (not reachable from the build session). Category is required to create a
-// product, so a game without an id here can't be listed yet. WHATNOT_CATEGORY_IDS (JSON, e.g.
-// {"pokemon":"123"}) on the site overrides these while they are being confirmed.
-export const CATEGORY_IDS = { pokemon: null, mtg: null, yugioh: null, one_piece: null, lorcana: null, other: null };
-
-export function categoryIdFor(game, env = process.env) {
-  let override = {};
-  try { override = env.WHATNOT_CATEGORY_IDS ? JSON.parse(env.WHATNOT_CATEGORY_IDS) : {}; } catch { override = {}; }
-  const id = override[game] ?? CATEGORY_IDS[game] ?? override.other ?? CATEGORY_IDS.other;
-  return id ? String(id) : null;
-}
+export { TOKEN_PREFIX, APP_TOKEN_PREFIX, WHATNOT_SCOPES, TOKEN_PAGE, CONDITION_LABELS, categoryFor, categoryIdFor, productAttributes };
+// CONFIRM: the spec sets no limit on a product's images; we send at most as many as eBay takes.
+export const MAX_WHATNOT_PHOTOS = MAX_LISTING_PHOTOS;
+const PAGE = 50;                                         // the spec's maximum page size
 
 // A card-sized package when the seller has no Whatnot shipping profile: 3 oz, 9 x 6 x 1 in, or the
 // seller's own numbers from Snap settings (the same ones eBay listings use).
@@ -49,22 +43,27 @@ export const money = (n, currency = 'USD') => ({ amount: Number(n).toFixed(2), c
 
 export function descriptionText(card) {
   const body = String(card.description || '').trim() || buildDescription(card);
-  const cond = CONDITION_LABELS[card.condition] || CONDITION_LABELS.NM;
+  const x = card.extraction || {};
+  const slab = [card.grader || x.grader, card.grade || x.grade].filter(Boolean).join(' ');
+  const cond = x.graded ? `Graded${slab ? ` (${slab})` : ''}` : CONDITION_LABELS[card.condition] || CONDITION_LABELS.NM;
   return `Condition: ${cond}\n\n${body}`.trim();
 }
 
-// The POST /products body. No price or quantity here: Whatnot prices the variant separately.
-export function productBody(card, { photoUrls, categoryId, account, settings = {} }) {
+// The POST /products body (CreateProductRequest). No price or quantity: those go on the variant.
+// `category` is from categoryFor(card); the card details sent are only the ones that category takes.
+// dimension_profile is required: the seller's chosen Whatnot profile by id, or our own package
+// (weight + dimensions), which Whatnot saves as a profile.
+export function productBody(card, { photoUrls, category, categoryId, account, settings = {} }) {
+  const cat = category || { id: String(categoryId), attrs: categoryFor(card)?.attrs || {} };
   const profileId = account?.settings?.shipping_profile_id;
-  const attributes = CONDITION_ATTRIBUTE_ID ? [{ id: CONDITION_ATTRIBUTE_ID, value: CONDITION_LABELS[card.condition] || CONDITION_LABELS.NM }] : [];
+  const attributes = productAttributes(card, cat);
   return {
     title: String(card.title || '').slice(0, 80),
     description: descriptionText(card),
-    external_id: String(card.id),
-    category: { id: categoryId },
+    external_id: String(card.id).slice(0, 150),
+    category: { id: String(cat.id) },
     ...(attributes.length ? { attributes } : {}),
     media: photoUrls.slice(0, MAX_WHATNOT_PHOTOS).map((url, i) => ({ url, alt: i === 0 ? String(card.title || '').slice(0, 120) : null })),
-    // CONFIRM (3): whether a saved profile id alone is accepted, and which markets need dimensions.
     dimension_profile: profileId ? { id: String(profileId) } : inlineDimensionProfile(settings),
     hazardous_material: 'not_hazardous',
   };
@@ -110,25 +109,41 @@ async function pageAll(c, path, query, { maxPages = 10, stop = () => false } = {
   return out;
 }
 
-// CONFIRM (8): GET /products has no filter, so a lost create is found by paging the newest products
-// for our external_id (the card id).
+// GET /products takes only limit, cursor and reverse (newest first), so a create whose answer was
+// lost is found by paging the newest products for our external_id (the card id).
 export async function findProductByExternalId(c, externalId, maxPages = 4) {
   let hit = null;
   await pageAll(c, '/products', { reverse: true }, { maxPages, stop: (rows) => { hit = rows.find((p) => p.external_id === String(externalId)) || null; return !!hit; } });
   return hit;
 }
 
+// PATCH /products/{id}/variants answers 207 with { variants, errors }; errors are only listed with
+// allow_partial_updates (we don't send it, so a bad patch is a 422 and nothing is written).
+const VARIANT_ERRORS = {
+  variant_not_found: 'Whatnot can\'t find that listing any more.',
+  variant_not_editable: 'Whatnot won\'t let this listing\'s price change right now (it may be in a live show or sold).',
+  variants_not_supported: 'Whatnot won\'t take a price for this listing.',
+  pricing_transaction_type_mismatch: 'Whatnot has this listing set up as an auction. Change it on Whatnot.',
+};
 function variantErrors(result) {
   const errs = result?.errors || [];
-  if (errs.length) throw new MarketplaceError('rejected', `Whatnot said: ${errs.map((e) => e.message || e.code).join('; ')}`);
+  if (errs.length) throw new MarketplaceError('rejected', VARIANT_ERRORS[errs[0].code] || `Whatnot said: ${errs.map((e) => e.message || e.code).join('; ')}`);
 }
 
+// POST /inventory/set answers 207 with one InventoryResult per item. The idempotency key makes a
+// retried request (after a 429) apply once.
+const INVENTORY_ERRORS = {
+  not_editable: 'Whatnot won\'t let this listing\'s quantity change right now (it may be in a live show).',
+  inventory_not_supported: 'Whatnot doesn\'t keep a quantity for this listing.',
+  variant_not_found: 'Whatnot can\'t find that listing any more.',
+  inventory_level_not_found: 'Whatnot can\'t find that listing\'s stock any more.',
+};
 async function setQuantity(c, variantId, quantity, { missingOk = false } = {}) {
   const r = await c.post('/inventory/set', { items: [{ variant_id: String(variantId), quantity: Math.max(0, Math.floor(quantity)), idempotency_key: crypto.randomUUID() }] });
   const st = r?.results?.[0]?.status;
   if (['applied', 'already_applied'].includes(st)) return r.results[0].new_quantity ?? quantity;
   if (missingOk && ['variant_not_found', 'inventory_level_not_found'].includes(st)) return 0;
-  throw new MarketplaceError('rejected', `Whatnot didn't change the quantity (${st || 'no result'}).`);
+  throw new MarketplaceError('rejected', INVENTORY_ERRORS[st] || 'Whatnot didn\'t change the quantity. Try again in a minute.');
 }
 
 // ---------- the adapter ----------
@@ -159,7 +174,7 @@ export const whatnot = {
       if (e.code === 'missing_scope') throw new MarketplaceError('missing_scope', 'This token can\'t read your listings. Make a new one with read:inventory and write:inventory ticked.');
       throw e;
     }
-    // CONFIRM (3): dimension_profiles response shape; picks the first active card-sized one.
+    // PageResponse[DimensionProfile]: the seller's own active profiles. Picks a card-sized one.
     const usable = profiles.filter((p) => p?.id && p.active !== false);
     const small = usable.find((p) => p.weight?.unit === 'ounce' && Number(p.weight.value) <= 8) || usable[0] || null;
     return {
@@ -170,8 +185,8 @@ export const whatnot = {
 
   // Lists one card as Buy It Now in the seller's shop. `adopt` is a product id from an earlier try.
   async createListing(ctx, card, { price, quantity = 1, adopt = null, settings = {} } = {}) {
-    const categoryId = categoryIdFor(card.game);
-    if (!categoryId) throw new MarketplaceError('not_set_up', 'Whatnot listing for this game isn\'t switched on yet. We\'re confirming Whatnot\'s card categories.');
+    const category = categoryFor(card);
+    if (!category) throw new MarketplaceError('rejected', card.game === 'sports' ? 'Sports cards can\'t be listed on Whatnot from here yet.' : 'Whatnot has no card category for this game.');
     if (!(Number(price) >= 1)) throw new MarketplaceError('rejected', 'Set a Whatnot price of at least $1.00.');
     if (!(Number(quantity) >= 1)) throw new MarketplaceError('rejected', 'Set a quantity of at least 1.');
     const c = clientFor(ctx);
@@ -181,7 +196,7 @@ export const whatnot = {
     if (!product) {
       const photoUrls = await photoUrlsFor(ctx.db, ctx.userId, card);
       if (!photoUrls.length) throw new MarketplaceError('rejected', 'Whatnot needs at least one photo of the card.');
-      product = await c.post('/products', productBody(card, { photoUrls, categoryId, account: ctx.account, settings }));
+      product = await c.post('/products', productBody(card, { photoUrls, category, account: ctx.account, settings }));
     }
     const productId = String(product.id);
     try {
@@ -192,9 +207,9 @@ export const whatnot = {
         variants: [{ id: String(variant.id), price: money(price), sku: snapSku(card.id), external_id: String(card.id) }],
       }));
       const qty = await setQuantity(c, variant.id, quantity);
-      // CONFIRM (5): buy_it_now and not reserved for live puts it in the profile shop only.
+      // Publishes it: Buy It Now, not held for live shows, so it is for sale in the profile shop.
       await c.post(`/merchandising/products/${encodeURIComponent(productId)}`, { transaction_type: 'buy_it_now', reserve_for_live: false });
-      // CONFIRM (4): Product.url is the public product page.
+      // Product.url is the product in the seller's Whatnot inventory dashboard.
       return { externalId: productId, variantId: String(variant.id), listingId: null, url: product.url || null, price: Number(price), quantity: qty };
     } catch (e) {
       e.partial = { externalId: productId, url: product.url || null };
@@ -207,7 +222,6 @@ export const whatnot = {
     const out = { price: listing.price != null ? Number(listing.price) : null, quantity: listing.quantity };
     if (price != null) {
       if (!(Number(price) >= 1)) throw new MarketplaceError('rejected', 'Set a Whatnot price of at least $1.00.');
-      // CONFIRM (6): PATCH variants body shape.
       variantErrors(await c.patch(`/products/${encodeURIComponent(listing.external_id)}/variants`, { variants: [{ id: String(listing.external_variant_id), price: money(price) }] }));
       out.price = Number(price);
     }
@@ -215,9 +229,10 @@ export const whatnot = {
     return out;
   },
 
-  // Takes the card down. Quantity 0 stops sales and keeps the history; a card the seller ends
-  // that never sold is also deleted from their catalog. "Already gone" counts as ended.
-  // CONFIRM (7): whether quantity 0 hides it from the shop, and what DELETE does to a sold product.
+  // Takes the card down. Quantity 0 means nobody can buy it and keeps the history; a card the seller
+  // ends that never sold is also deleted from their catalog (DELETE answers 204, or 409 when Whatnot
+  // keeps it, e.g. it has orders). "Already gone" (404) counts as ended.
+  // CONFIRM: whether a quantity-0 product still shows in the profile shop as sold out.
   async endListing(ctx, listing, { reason = 'seller' } = {}) {
     const c = clientFor(ctx);
     try {
@@ -230,9 +245,10 @@ export const whatnot = {
     return { ok: true };
   },
 
-  // Sale lines since `since`. CONFIRM (9): GET /orders has no date filter; it pages newest first, so
-  // we read back to `lookbackMs` before `since` (cancellations change older orders) and only open
-  // the items of orders updated in the last window.
+  // Sale lines since `since`. GET /orders takes only limit, cursor and reverse (newest first), so we
+  // page back to `lookbackMs` before `since` (cancellations change older orders) and only open the
+  // items (GET /orders/{id}/items, OrderItem.product_external_id = our card id) of orders updated in
+  // the last window. Order status: pending, pending_fulfillment, completed, cancelled, failed.
   async fetchSales(ctx, { since = null, lookbackMs = 72 * 3600_000, windowMs = 30 * 60_000, maxPages = 10 } = {}) {
     const c = clientFor(ctx);
     const sinceMs = since ? Date.parse(since) : Date.now() - 7 * 864e5;
@@ -248,7 +264,7 @@ export const whatnot = {
           cardId: it.product_external_id || null, variantId: it.variant_id || null,
           quantity: Number(it.quantity) || 1, price: it.unit_price?.amount != null ? Number(it.unit_price.amount) : null,
           currency: it.unit_price?.currency || 'USD', at: o.created_at || null,
-          status: ['cancelled', 'failed'].includes(o.status) ? 'cancelled' : o.status || 'pending', url: o.url || null,
+          status: ['cancelled', 'failed'].includes(o.status) || o.cancelled_at ? 'cancelled' : o.status || 'pending', url: o.url || null,
         });
       }
     }

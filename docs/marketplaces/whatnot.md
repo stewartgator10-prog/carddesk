@@ -64,8 +64,28 @@ write:merchandising read:orders` (plus `read:shipments` later for shipping).
 dynamic client registration endpoint, so Tyche Cards needs a client id from Whatnot (partner app) before
 one-click connect is possible. Personal access tokens work today.
 
-**Category ids** come from github.com/Whatnot-Inc/product-taxonomy (`data/taxonomy.json`); not reachable
-from this cloud session yet. Until confirmed, keep the category id per game in one config map.
+**Category ids and card details** come from Whatnot's taxonomy (`whatnot-api/taxonomy.json`, version
+1.2.3, from github.com/Whatnot-Inc/product-taxonomy). `scripts/whatnot-taxonomy.mjs` turns it into
+`netlify/lib/marketplaces/whatnot-taxonomy.js` (the TCG categories under "Trading Card Games" (149) and
+the card details each takes); `whatnot-details.js` picks the category and fills the details.
+- pokemon 2, mtg 9, yugioh 8, one_piece 567, lorcana 2013. Game "other" is matched by the typed game
+  name (Dragon Ball 12, Digimon 94, Flesh & Blood 154, Weiß Schwarz 93, UniVersus 92, Union Arena 1471,
+  Gundam 2014, Sorcery 1405, MetaZoo 58, Naruto 311, Riftbound 2015, ...), else 138 "Kickstarter &
+  Other Cards". Sports cards: none (not offered).
+- Details (all optional in every TCG category): condition (84 `tcg.condition`: Near Mint, Light Played,
+  Moderately Played, Heavily Played, Damaged, Graded), set, card number, language, rarity, product type
+  (the single-card choice), graded / grading service / grade / cert. A fixed-list (ENUM) value is sent
+  only when it is in the list; free-text details take our text.
+- `WHATNOT_CATEGORY_IDS` (JSON) still overrides a game's category; for "other" it is only the fallback.
+- Regenerate after a taxonomy update: save the new `taxonomy.json`, run `node scripts/whatnot-taxonomy.mjs`,
+  run `npm test` (a test checks the table against the file).
+
+**Errors**: only 422 has a documented body (`HTTPValidationError { detail: [{ loc, msg, type }] }`);
+401/403/404/409 have none. Whatnot's HTTP status is never passed to the browser: our endpoints answer
+with their own status per error code.
+
+**Spec oddity**: the Products guide text says `pricing.buy_it_now.price`, but `ProductVariantPatch`
+(additionalProperties false) has `price: Money`. We follow the schema.
 
 ## Webhooks
 Standard Webhooks (HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{body}`, secret prefix `wn_wh_`,
@@ -99,21 +119,20 @@ on its allowed hosts to read docs, call the API or connect the MCP server.
 - `MARKETPLACE_TOKEN_KEY` on BOTH sites, the same value: `openssl rand -base64 32`. Without it, connect
   answers "Whatnot isn't set up on this site yet" and stores nothing.
 - `SALES_CHECK=off` on Tyche Cards (jaxspic runs the 5-minute check for everyone, like the nightly refresh).
-- `WHATNOT_CATEGORY_IDS` (JSON, e.g. `{"pokemon":"123","mtg":"456","other":"789"}`) until the taxonomy
-  ids are confirmed and written into `CATEGORY_IDS` in whatnot.js. A game with no id can't be listed yet.
+- `WHATNOT_CATEGORY_IDS` is no longer needed: categories come from Whatnot's taxonomy. It still overrides a game if set.
+- Also apply `supabase/migrations/20261130000000_marketplace_sale_locks.sql` (one sale check per seller at a time).
 
-## Confirm against the live API before go-live (`// CONFIRM:` in the code)
-1. Scope names; whether `/users/me` says the token's scopes or expiry (it doesn't in the spec).
-2. `POST /products` with our body; whether Whatnot copies media URLs at create time (we send 1-hour
-   signed links or eBay picture links); max photos; condition attribute id (`CONDITION_ATTRIBUTE_ID`).
-3. Dimension profile id alone accepted; `dimension_profiles` shape.
-4. `Product.url` is the public product page.
-5. Merchandising `{ transaction_type: 'buy_it_now', reserve_for_live: false }` = shop only.
-6. `PATCH /products/{id}/variants` and `/inventory/set` bodies as sent.
-7. Ending: quantity 0 hides it from the shop? DELETE on a sold product (409?).
-8. `GET /products` has no filter: we page the newest 200 products for our `external_id` to adopt a lost create.
-9. `GET /orders` has no date filter: we page newest first back 72 h; order status values; whether a
-   cancelled order puts the stock back on Whatnot.
-10. Error body format for 400/403/409/422 (we read `detail` / `message`).
-11. `RateLimit-*` headers; per token or per app.
-12. Taxonomy ids per game; graded slabs.
+## Still to check on a live shop (`// CONFIRM:` in the code)
+Resolved from the saved spec (Nov 30, 2026): scope names; `/users/me` has no scopes or expiry;
+`POST /products` body; dimension profile by id or inline; `Product.url` is the seller's dashboard page;
+merchandising `{ transaction_type: 'buy_it_now', reserve_for_live: false }` publishes to the profile
+shop; variant price and `/inventory/set` bodies; DELETE answers 204/404/409; `GET /products` and
+`GET /orders` take only limit/cursor/reverse; order statuses; error bodies; category ids and condition.
+
+Still open (the spec doesn't say):
+1. Whether Whatnot copies media URLs at create time (we send 1-hour signed links or eBay picture links), and its photo limit.
+2. Whether a quantity-0 product still shows in the profile shop as sold out.
+3. Whether a cancelled order puts the stock back on Whatnot by itself.
+4. The value format for BOOLEAN attributes (we send `"true"`).
+5. Rate limit headers (`RateLimit-*`), and whether the 10/s limit is per token or per app (from the docs, not the spec).
+6. Whether "Publishing needs ... an image" is met by product media alone, or the variant needs its own image.

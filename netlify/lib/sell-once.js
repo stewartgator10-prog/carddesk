@@ -4,14 +4,17 @@
 //
 // Each sale line is first inserted into marketplace_orders with "on conflict do nothing"; only a
 // line that was new is acted on, so running the check twice, or from both sites at once, ends
-// things once and records the sale once. Ending failures leave the listing active with last_error
-// and are retried on every check (retryPendingEnds).
+// things once and records the sale once. A line that stopped partway is finished by the next check
+// from that table, whether or not the marketplace still returns it. Ending failures leave the
+// listing active with last_error and are retried on every check (retryPendingEnds). Only one check
+// per seller runs at a time (takeSaleLock).
 //
 // decideSale() is pure; handleSales()/runSaleCheck() are the thin runners around it.
 import { adapterFor, contextFor, ACCOUNT_MARKETPLACES, MARKETPLACE_LABELS } from './marketplaces/registry.js';
 import { isMarketplaceError } from './marketplaces/errors.js';
 import { allRows, chunks } from './db-pages.js';
 import { crossListedCards } from './sales-run.js';
+import crypto from 'node:crypto';
 
 const LIVE = ['active', 'ending'];
 const CHANNEL = { whatnot: 'Whatnot', ebay: 'eBay', shopify: 'Shopify', tcgplayer: 'TCGplayer' };
@@ -133,7 +136,7 @@ async function handleCancel(db, userId, marketplace, s, existing) {
   const qty = Math.max(1, Number(existing.quantity) || 1);
   await must(db.from('snap_items').update({ quantity: Math.max(0, Number(card.quantity) || 0) + qty, sold_out_at: null, sale_note: { ...note, cancelled: true, restored: true } })
     .eq('id', card.id).eq('user_id', userId));
-  // CONFIRM (9): whether Whatnot puts the stock back itself on a cancelled order.
+  // CONFIRM: the spec doesn't say whether Whatnot puts the stock back itself on a cancelled order.
   if (existing.listing_id) {
     await must(db.from('marketplace_listings').update({ status: 'active', sold_at: null, updated_at: new Date().toISOString() })
       .eq('id', existing.listing_id).eq('status', 'sold'));
@@ -166,7 +169,17 @@ async function crossListedRows(db, userId) {
   return { others, ebay };
 }
 
-// Acts on sale lines from one marketplace. Returns counts and the problems the seller should see.
+// A line we recorded earlier, rebuilt as a sale line, so it is finished even when the marketplace no
+// longer returns it (an older order, or one past the look-back).
+export function lineFromRow(r) {
+  return {
+    orderId: r.external_order_id, lineId: r.external_line_id, quantity: r.quantity, price: r.item_price ?? null, status: r.status || null,
+    at: r.ordered_at || null, externalId: r.raw?.externalId ?? null, cardId: r.raw?.cardId ?? null, url: r.raw?.url ?? null,
+  };
+}
+
+// Acts on sale lines from one marketplace, then on any line recorded earlier and not finished
+// (whatever the marketplace returned this time). Returns counts and the problems the seller should see.
 export async function handleSales({ db, userId, marketplace, sales, deps = {} }) {
   const out = { newSales: 0, ended: 0, updated: 0, doubleSales: 0, cancelled: 0, problems: [] };
   let todo = sales || [];
@@ -177,81 +190,118 @@ export async function handleSales({ db, userId, marketplace, sales, deps = {} })
     const items = new Set(ebay.map((l) => String(l.external_id)));
     todo = todo.filter((x) => items.has(String(x.externalId)));
   }
-  for (const s of todo) {
+  const key = (x) => `${x.orderId}|${x.lineId}`;
+  const seen = new Set(todo.filter((x) => x?.orderId && x?.lineId).map(key));
+  const unfinished = await must(db.from('marketplace_orders').select('*').eq('user_id', userId).eq('marketplace', marketplace).is('handled_at', null));
+  const leftover = unfinished.filter((r) => r.status !== 'cancelled').map(lineFromRow).filter((x) => !seen.has(key(x)));
+  for (const s of [...todo, ...leftover]) {
     if (!s?.orderId || !s?.lineId) continue;
-    const nowIso = new Date().toISOString();
-    const existing = await must(db.from('marketplace_orders').select('*').eq('user_id', userId).eq('marketplace', marketplace)
-      .eq('external_order_id', String(s.orderId)).eq('external_line_id', String(s.lineId)).maybeSingle());
-    let retry = false;
-    if (existing) {
-      if (s.status === 'cancelled' && existing.status !== 'cancelled') { await handleCancel(db, userId, marketplace, s, existing); out.cancelled++; }
-      if (existing.handled_at || existing.status === 'cancelled' || s.status === 'cancelled') continue;
-      // Recorded by an earlier check that stopped partway: finish it now.
-      if (!(await claimLine(db, userId, marketplace, existing, nowIso))) continue;
-      retry = true;
-    } else {
-      const { isNew } = await recordLine(db, userId, marketplace, s, nowIso);
-      if (!isNew) continue;   // the other site (or a parallel run) got it first
-    }
-    const done = (patch = {}) => must(db.from('marketplace_orders').update({ handled_at: new Date().toISOString(), ...patch }).eq('user_id', userId).eq('marketplace', marketplace)
-      .eq('external_order_id', String(s.orderId)).eq('external_line_id', String(s.lineId)));
-    try {
-      const r = await handleLine({ db, userId, marketplace, s, deps, done, retry, nowIso });
-      for (const k of ['newSales', 'ended', 'updated', 'doubleSales']) out[k] += r[k] || 0;
-      out.problems.push(...(r.problems || []));
-    } catch (e) {
-      // Let the next check take the line over straight away instead of waiting for the claim to expire.
-      await db.from('marketplace_orders').update({ claimed_at: null }).eq('user_id', userId).eq('marketplace', marketplace)
-        .eq('external_order_id', String(s.orderId)).eq('external_line_id', String(s.lineId)).is('handled_at', null);
-      throw e;
-    }
+    const r = await handleOne({ db, userId, marketplace, s, deps });
+    for (const k of ['newSales', 'ended', 'updated', 'doubleSales', 'cancelled']) out[k] += r[k] || 0;
+    out.problems.push(...(r.problems || []));
   }
   return out;
 }
 
-// One sale line, after this run has claimed it. `retry`: an earlier check recorded it and stopped
-// partway, so steps it already took are not taken twice.
+async function handleOne({ db, userId, marketplace, s, deps }) {
+  const nowIso = new Date().toISOString();
+  const existing = await must(db.from('marketplace_orders').select('*').eq('user_id', userId).eq('marketplace', marketplace)
+    .eq('external_order_id', String(s.orderId)).eq('external_line_id', String(s.lineId)).maybeSingle());
+  let retry = false;
+  let cancelled = 0;
+  if (existing) {
+    if (s.status === 'cancelled' && existing.status !== 'cancelled') { await handleCancel(db, userId, marketplace, s, existing); cancelled = 1; }
+    if (existing.handled_at || existing.status === 'cancelled' || s.status === 'cancelled') return { cancelled };
+    // Recorded by an earlier check that stopped partway: finish it now.
+    if (!(await claimLine(db, userId, marketplace, existing, nowIso))) return {};
+    retry = true;
+  } else {
+    const { isNew } = await recordLine(db, userId, marketplace, s, nowIso);
+    if (!isNew) return {};   // the other site (or a parallel run) got it first
+  }
+  const done = (patch = {}) => must(db.from('marketplace_orders').update({ handled_at: new Date().toISOString(), ...patch }).eq('user_id', userId).eq('marketplace', marketplace)
+    .eq('external_order_id', String(s.orderId)).eq('external_line_id', String(s.lineId)));
+  try {
+    return await handleLine({ db, userId, marketplace, s, deps, done, retry, nowIso });
+  } catch (e) {
+    // Let the next check take the line over straight away instead of waiting for the claim to expire.
+    await db.from('marketplace_orders').update({ claimed_at: null }).eq('user_id', userId).eq('marketplace', marketplace)
+      .eq('external_order_id', String(s.orderId)).eq('external_line_id', String(s.lineId)).is('handled_at', null);
+    throw e;
+  }
+}
+
+const sameLine = (marketplace, s) => (o) => o.marketplace === marketplace && String(o.orderId) === String(s.orderId) && String(o.lineId ?? s.lineId) === String(s.lineId);
+const loadCard = (db, userId, id) => must(db.from('snap_items').select('*').eq('id', id).eq('user_id', userId).maybeSingle());
+const loadListings = (db, userId, cardId) => must(db.from('marketplace_listings').select('*').eq('user_id', userId).eq('snap_item_id', cardId));
+
+// Merges this sale's end/stock results into the card's note (as it is now: another sale of the
+// same card may have written its own since), keeping entries for other marketplaces.
+async function finishNote(db, userId, cardId, marketplace, s, { ended, updated }) {
+  const card = await loadCard(db, userId, cardId);
+  const note = card?.sale_note;
+  if (!note || !(note.orders || []).some(sameLine(marketplace, s))) return;
+  const merge = (old = [], mine = []) => [...old.filter((e) => !mine.some((m) => m.marketplace === e.marketplace)), ...mine];
+  await must(db.from('snap_items').update({ sale_note: { ...note, ended: merge(note.ended, ended), updated: merge(note.updated, updated) } }).eq('id', cardId).eq('user_id', userId));
+}
+
+// One sale line, after this run has claimed it. The card's stock is taken first, in one update that
+// only applies if the stock is still what we read: two sales of one card handled at the same time
+// (a Whatnot check and an eBay sync) can't both see the last unit, so the second is the double sale
+// and its note lists both orders. `retry`: an earlier check recorded this line and stopped partway.
 async function handleLine({ db, userId, marketplace, s, deps, done, retry, nowIso }) {
   const out = { newSales: 0, ended: 0, updated: 0, doubleSales: 0, problems: [] };
   if (s.status === 'cancelled') { await done(); return out; }
-  const listing = await findListing(db, userId, marketplace, s);
-  if (!listing?.snap_item_id) { await done({ listing_id: listing?.id || null }); return out; }   // not one of our cards
-  const listings = await must(db.from('marketplace_listings').select('*').eq('user_id', userId).eq('snap_item_id', listing.snap_item_id));
+  const listing0 = await findListing(db, userId, marketplace, s);
+  if (!listing0?.snap_item_id) { await done({ listing_id: listing0?.id || null }); return out; }   // not one of our cards
+  let listings = await loadListings(db, userId, listing0.snap_item_id);
   // An eBay sale of a card that was never on another marketplace is left to the eBay sync as before.
-  if (marketplace === 'ebay' && !listings.some((l) => l.marketplace !== 'ebay')) { await done({ listing_id: listing.id, snap_item_id: listing.snap_item_id }); return out; }
-  const card = await must(db.from('snap_items').select('*').eq('id', listing.snap_item_id).eq('user_id', userId).maybeSingle());
-  if (!card) { await done({ listing_id: listing.id }); return out; }
+  if (marketplace === 'ebay' && !listings.some((l) => l.marketplace !== 'ebay')) { await done({ listing_id: listing0.id, snap_item_id: listing0.snap_item_id }); return out; }
+  let card = await loadCard(db, userId, listing0.snap_item_id);
+  if (!card) { await done({ listing_id: listing0.id }); return out; }
   // A sale from before the card went up on another marketplace was already counted in its stock.
-  if (soldBeforeCrossListed(s, listings, marketplace)) { await done({ listing_id: listing.id, snap_item_id: card.id }); return out; }
+  if (soldBeforeCrossListed(s, listings, marketplace)) { await done({ listing_id: listing0.id, snap_item_id: card.id }); return out; }
 
-  // The earlier check already took this sale off the card's stock: only the last steps are left.
-  const counted = retry && (card.sale_note?.orders || []).some((o) => o.marketplace === marketplace && String(o.orderId) === String(s.orderId) && String(o.lineId ?? s.lineId) === String(s.lineId));
-  if (counted) {
-    if (Number(card.quantity) === 0) await markInventorySold(db, userId, card, listing, marketplace, s);
-    await done({ listing_id: listing.id, snap_item_id: card.id });
-    return out;
+  // 1. Take the sale off the card's stock (unless an earlier try already did: its note has this order).
+  let decision = null;
+  for (let attempt = 0; ; attempt++) {
+    if ((card.sale_note?.orders || []).some(sameLine(marketplace, s))) break;
+    const listing = listings.find((l) => l.id === listing0.id) || listing0;
+    decision = decideSale({ card, listing, listings, soldQty: s.quantity });
+    const note = saleNote({ marketplace, sale: s, decision, previous: card.sale_note });
+    const won = await must(db.from('snap_items').update({ quantity: decision.left, sold_out_at: decision.left === 0 ? (card.sold_out_at || nowIso) : null, sale_note: note })
+      .eq('id', card.id).eq('user_id', userId).eq('quantity', card.quantity).select('id'));
+    if (won.length) { card = { ...card, quantity: decision.left, sale_note: note }; break; }
+    if (attempt >= 4) throw new Error('The card kept changing while we recorded the sale. We\'ll try again on the next check.');
+    decision = null;
+    card = await loadCard(db, userId, card.id);
+    listings = await loadListings(db, userId, card.id);
+    if (!card) { await done({ listing_id: listing0.id }); return out; }
   }
+  const left = decision ? decision.left : Math.max(0, Number(card.quantity) || 0);
+  if (decision) { out.newSales++; if (decision.doubleSale) out.doubleSales++; }
 
-  out.newSales++;
-  // On a retry the sold listing may already show the sale; the card's stock (not yet changed) is the truth.
-  const sold = retry ? { ...listing, quantity: card.quantity ?? listing.quantity } : listing;
-  const decision = decideSale({ card, listing: sold, listings, soldQty: s.quantity });
-  await must(db.from('marketplace_listings').update({ ...decision.listingPatch, ...(decision.listingPatch.status === 'sold' ? { sold_at: s.at || nowIso } : {}), updated_at: nowIso }).eq('id', listing.id));
-  // Listings the earlier check already ended for this sale still belong in the note.
-  const ended = retry ? listings.filter((l) => l.id !== listing.id && l.status === 'ended' && l.ended_reason === 'sold_elsewhere' && decision.left === 0).map((l) => ({ marketplace: l.marketplace, ok: true })) : [];
+  // 2. The listing that sold, then every other live listing: end it (none left) or show the new count.
+  const sold = listings.find((l) => l.id === listing0.id) || listing0;
+  const patch = decision ? decision.listingPatch : left === 0 ? { status: 'sold', quantity: 0 } : null;
+  if (patch && !(sold.status === 'sold' && patch.status === 'sold')) {
+    await must(db.from('marketplace_listings').update({ ...patch, ...(patch.status === 'sold' ? { sold_at: s.at || nowIso } : {}), updated_at: nowIso }).eq('id', sold.id));
+  }
+  const others = listings.filter((l) => l.id !== sold.id && l.status === 'active');
+  const actions = others.filter((l) => left === 0 || Number(l.quantity) !== left).map((l) => (left === 0 ? { kind: 'end', listing: l } : { kind: 'update', listing: l, quantity: left }));
+  // Listings an earlier try already ended for this sale still belong in the note.
+  const ended = retry && left === 0 ? listings.filter((l) => l.id !== sold.id && l.status === 'ended' && l.ended_reason === 'sold_elsewhere').map((l) => ({ marketplace: l.marketplace, ok: true })) : [];
   const updated = [];
-  for (const a of decision.actions) {
+  for (const a of actions) {
     const r = await apply(db, userId, a, deps);
     (a.kind === 'end' ? ended : updated).push(r);
     if (r.ok) out[a.kind === 'end' ? 'ended' : 'updated']++;
     else out.problems.push(`${MARKETPLACE_LABELS[r.marketplace]}: ${r.error}`);
   }
-  if (decision.doubleSale) out.doubleSales++;
-  const note = saleNote({ marketplace, sale: s, decision, ended, updated, previous: card.sale_note });
-  await must(db.from('snap_items').update({ quantity: decision.left, sold_out_at: decision.left === 0 ? (card.sold_out_at || nowIso) : null, sale_note: note })
-    .eq('id', card.id).eq('user_id', userId));
-  if (decision.left === 0) await markInventorySold(db, userId, card, listing, marketplace, s);
-  await done({ listing_id: listing.id, snap_item_id: card.id });
+  // 3. The note says what happened, then the stock row is marked sold.
+  await finishNote(db, userId, card.id, marketplace, s, { ended, updated });
+  if (left === 0) await markInventorySold(db, userId, card, sold, marketplace, s);
+  await done({ listing_id: sold.id, snap_item_id: card.id });
   return out;
 }
 
@@ -291,9 +341,38 @@ export async function crossListedCount(db, userId) {
   return (await crossListedCards(db, userId)).length;
 }
 
+// One sale check per seller at a time. Scheduled runs start every 5 minutes and can run longer, and
+// "Check for sales now" can start one too, so each check holds a lease on the seller first. The
+// lease runs out on its own (SALE_LOCK_MS, the longest a background function runs), so a check that
+// was cut off never blocks the next one for long.
+export const SALE_LOCK_MS = 15 * 60_000;
+
+export async function takeSaleLock(db, userId, { holder = crypto.randomUUID(), now = Date.now(), leaseMs = SALE_LOCK_MS } = {}) {
+  const until = new Date(now + leaseMs).toISOString();
+  const row = { user_id: userId, holder, locked_until: until, updated_at: new Date(now).toISOString() };
+  const made = await must(db.from('marketplace_sale_locks').upsert(row, { onConflict: 'user_id', ignoreDuplicates: true }).select('user_id'));
+  if (made.length) return holder;
+  // Someone holds (or held) it: take it over only once their lease has run out.
+  const taken = await must(db.from('marketplace_sale_locks').update({ holder, locked_until: until, updated_at: row.updated_at })
+    .eq('user_id', userId).lt('locked_until', new Date(now).toISOString()).select('user_id'));
+  return taken.length ? holder : null;
+}
+
+export async function releaseSaleLock(db, userId, holder) {
+  const at = new Date(Date.now() - 1000).toISOString();   // already run out: free for the next check
+  await db.from('marketplace_sale_locks').update({ locked_until: at, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('holder', holder);
+}
+
 // The whole sale check for one seller: Whatnot orders, eBay orders when a card is on two
-// marketplaces, then retries of earlier failed ends. Runs on every plan.
+// marketplaces, then retries of earlier failed ends. Runs on every plan. Returns { busy: true }
+// without doing anything when another check for this seller is still running.
 export async function runSaleCheck({ db, userId, deps = {}, includeEbay = null }) {
+  const holder = await takeSaleLock(db, userId);
+  if (!holder) return { busy: true, checked: [], newSales: 0, ended: 0, updated: 0, doubleSales: 0, problems: [] };
+  try { return await saleCheck({ db, userId, deps, includeEbay }); } finally { await releaseSaleLock(db, userId, holder).catch(() => {}); }
+}
+
+async function saleCheck({ db, userId, deps, includeEbay }) {
   const startedAt = new Date().toISOString();
   const res = { checked: [], newSales: 0, ended: 0, updated: 0, doubleSales: 0, problems: [] };
   const add = (r) => { for (const k of ['newSales', 'ended', 'updated', 'doubleSales']) res[k] += r[k] || 0; res.problems.push(...(r.problems || [])); };

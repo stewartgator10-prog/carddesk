@@ -10,14 +10,14 @@ const srv = serve(DIST, 4821), srvT = serve(DIST_TYCHE, 4822);
 const U = '11111111-1111-1111-1111-111111111111';
 const TOKEN = 'wn_pat_tk_E2E_SECRET_123';
 const mk = (id, title, over = {}) => ({ id, user_id: U, status: 'listed', publish_state: 'listed', game: 'pokemon', condition: 'NM', review_reasons: [], photo_edits: {}, photo_path: `${U}/b/${id}.jpg`, extra_photo_paths: [], title, price: 12.5, quantity: 1, description: 'Pack fresh.', ebay_live: { title, description: 'Pack fresh.' }, ebay_picture_urls: ['https://i.ebayimg.com/x.jpg'], ebay_item_id: '40' + id, ebay_url: 'https://www.ebay.com/itm/40' + id, listed_at: '2026-11-01', created_at: '2026-11-27T22:00:00Z', ...over });
-const L = (id, card, marketplace, over = {}) => ({ id, user_id: U, snap_item_id: card, marketplace, external_id: marketplace + id, external_variant_id: 'V' + id, url: marketplace === 'ebay' ? `https://www.ebay.com/itm/${id}` : `https://www.whatnot.com/listing/${id}`, price: 12.5, quantity: 1, status: 'active', listed_at: '2026-11-20T00:00:00Z', created_at: '2026-11-20T00:00:00Z', updated_at: '2026-11-20T00:00:00Z', ...over });
+const L = (id, card, marketplace, over = {}) => ({ id, user_id: U, snap_item_id: card, marketplace, external_id: marketplace + id, external_variant_id: 'V' + id, url: marketplace === 'ebay' ? `https://www.ebay.com/itm/${id}` : `https://www.whatnot.com/product/${id}`, price: 12.5, quantity: 1, status: 'active', listed_at: '2026-11-20T00:00:00Z', created_at: '2026-11-20T00:00:00Z', updated_at: '2026-11-20T00:00:00Z', ...over });
 const db = {
   settings: [], api_usage: [],
   snap_items: [
     mk('1', 'Charizard ex 199/165 Pokemon 151 Special Illustration Rare', { quantity: 3 }),
     mk('2', 'Mew ex 151/165 Pokemon 151 Holo', { quantity: 0, sold_out_at: '2026-11-28T14:56:00Z', sale_note: { marketplace: 'whatnot', at: '2026-11-28T14:55:00Z', price: 14, quantity: 1, quantity_left: 0, ended: [{ marketplace: 'ebay', ok: true }], updated: [], double_sale: false, orders: [] } }),
     mk('3', 'Pikachu 025/165 Pokemon 151', { quantity: 0, sold_out_at: '2026-11-28T14:56:00Z', sale_note: { marketplace: 'whatnot', at: '2026-11-28T14:55:00Z', price: 9, quantity: 1, quantity_left: 0, ended: [{ marketplace: 'ebay', ok: false, error: 'eBay said: Internal error to the application.' }], updated: [], double_sale: false, orders: [] } }),
-    mk('4', 'Bulbasaur 001/165 Pokemon 151', { quantity: 0, sale_note: { marketplace: 'whatnot', at: '2026-11-28T14:55:00Z', price: 5, quantity: 1, quantity_left: 0, ended: [], updated: [], double_sale: true, orders: [{ marketplace: 'ebay', url: 'https://www.ebay.com/sh/ord/1' }, { marketplace: 'whatnot', url: 'https://www.whatnot.com/order/2' }] } }),
+    mk('4', 'Bulbasaur 001/165 Pokemon 151', { quantity: 0, sale_note: { marketplace: 'whatnot', at: '2026-11-28T14:55:00Z', price: 5, quantity: 1, quantity_left: 0, ended: [], updated: [], double_sale: true, orders: [{ marketplace: 'ebay', url: 'https://www.ebay.com/sh/ord/1' }, { marketplace: 'whatnot', url: 'https://www.whatnot.com/dashboard/orders/2' }] } }),
     mk('5', 'Squirtle 007/165 Pokemon 151 Common', { status: 'approved', publish_state: null, ebay_item_id: null, ebay_url: null, ebay_live: null, ebay_picture_urls: null, price: 4.5 }),
   ],
   marketplace_listings: [
@@ -27,8 +27,8 @@ const db = {
     L('e4', '4', 'ebay', { status: 'sold' }), L('w4', '4', 'whatnot', { status: 'sold' }),
   ],
 };
-// Whatnot card categories not confirmed yet on this site until the connect step switches them on.
-let whatnot = { marketplace: 'whatnot', connected: false, activeCount: 0, categoryReady: false, readyGames: [] };
+// Every card game has a Whatnot category (from Whatnot's taxonomy); sports cards don't.
+let whatnot = { marketplace: 'whatnot', connected: false, activeCount: 0, categoryReady: true, readyGames: ['pokemon', 'mtg', 'yugioh', 'lorcana', 'one_piece', 'other'] };
 const log = [], errors = [], calls = [];
 const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
@@ -58,7 +58,7 @@ async function setup(page, { billing = { enabled: false } } = {}) {
     if (body) calls.push(`marketplaces ${req.method()} ${body.action || ''}${body.token ? ' token-sent' : ''}${body.endListings != null ? ' end=' + body.endListings : ''}`);
     if (req.method() === 'POST' && body.action === 'connect') {
       if (body.token !== TOKEN) return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: "Whatnot didn't accept that token. Check you copied all of it.", code: 'rejected' }) });
-      whatnot = { marketplace: 'whatnot', connected: true, username: 'jaxcards', status: 'connected', salesCheckedAt: new Date(Date.now() - 3 * 60000).toISOString(), activeCount: 4, categoryReady: true, readyGames: ['pokemon'], settings: { shippingProfileId: '501', shippingProfiles: [{ id: '501', name: 'Bubble mailer' }, { id: '502', name: 'Box' }] } };
+      whatnot = { marketplace: 'whatnot', connected: true, username: 'jaxcards', status: 'connected', salesCheckedAt: new Date(Date.now() - 3 * 60000).toISOString(), activeCount: 4, categoryReady: true, readyGames: ['pokemon', 'mtg', 'yugioh', 'lorcana', 'one_piece', 'other'], settings: { shippingProfileId: '501', shippingProfiles: [{ id: '501', name: 'Bubble mailer' }, { id: '502', name: 'Box' }] } };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ marketplace: whatnot }) });
     }
     const all = [{ marketplace: 'ebay', connected: true, username: 'jaxcards', status: 'connected', activeCount: 3 }, whatnot];
@@ -92,7 +92,7 @@ async function setup(page, { billing = { enabled: false } } = {}) {
   await strip.getByRole('button', { name: 'Connect Whatnot' }).click();
   await page.waitForTimeout(600);
   log.push('jump lands on panel: ' + await panel.evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < window.innerHeight; }));
-  log.push('category note: ' + await panel.getByRole('status').filter({ hasText: /switched on/ }).innerText());
+  log.push('category note shown: ' + await panel.getByRole('status').filter({ hasText: /switched on/ }).count());
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: OUT + '/xl-panel-empty.png', fullPage: true });
   await panel.getByRole('textbox', { name: 'Whatnot token' }).fill('abc123');
@@ -119,6 +119,17 @@ async function setup(page, { billing = { enabled: false } } = {}) {
   await page.screenshot({ path: OUT + '/xl-disconnect.png' });
   await choose.getByRole('button', { name: 'Cancel' }).click();
   log.push('panel overflow px: ' + await overflow(page));
+  // The token stopped working: the panel says so instead of "Connected as".
+  const good = whatnot;
+  whatnot = { ...good, status: 'reconnect', lastError: 'Whatnot stopped accepting your token.' };
+  await page.goto('http://localhost:4821/?tab=listings');
+  await panel.getByText('Needs a new token').waitFor({ timeout: 15000 });
+  log.push('reconnect header: ' + (await panel.locator('span.ink-dim').first().innerText()).replace(/\s+/g, ' '));
+  log.push('reconnect says "Connected as": ' + ((await panel.getByText(/Connected as/).count()) > 0) + ' | check-now button: ' + (await panel.getByRole('button', { name: 'Check for sales now' }).count()));
+  await panel.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: OUT + '/xl-panel-reconnect.png', fullPage: true });
+  log.push('reconnect overflow px: ' + await overflow(page));
+  whatnot = good;
 
   // ---- Snap to List: chips, notes, List on Whatnot ----
   await page.goto('http://localhost:4821/?tab=snap');
@@ -133,6 +144,9 @@ async function setup(page, { billing = { enabled: false } } = {}) {
   log.push('tabs: ' + (await page.getByRole('button', { name: /^On Whatnot/ }).innerText()));
   await page.screenshot({ path: OUT + '/xl-snap-listed.png', fullPage: true });
   log.push('snap overflow px: ' + await overflow(page));
+  // Sold-out cards offer no eBay edits (there is nothing live to change), only the quantity.
+  log.push('sold-out eBay title fields: ' + await page.getByRole('textbox', { name: 'eBay title' }).count() + ' | Update on eBay: ' + await page.getByRole('button', { name: 'Update on eBay' }).count());
+  log.push('sold-out reason: ' + await page.getByText(/eBay edits are off/).first().innerText());
   // End on eBay from the red note
   await page.getByRole('button', { name: 'End on eBay' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'End on eBay' }).click();
@@ -166,9 +180,23 @@ async function setup(page, { billing = { enabled: false } } = {}) {
   await page.screenshot({ path: OUT + '/xl-listed-whatnot.png', fullPage: true });
   log.push('overflow px: ' + await overflow(page));
 
+  // Restock a sold-out card with nothing live: it is for sale again and back in Approved.
+  await page.getByRole('button', { name: /^Sold \(3\)/ }).click();
+  const mew = page.locator('.bg-card', { hasText: 'Mew ex 151/165' }).first();
+  await mew.getByRole('spinbutton', { name: 'Quantity' }).fill('2');
+  await mew.getByRole('spinbutton', { name: 'Quantity' }).press('Enter');
+  await page.getByText(/^Stock is 2\./).waitFor();
+  log.push('restock: ' + await page.getByText(/^Stock is 2\./).innerText());
+  log.push('tabs after restock: ' + (await page.getByRole('button', { name: /^(Sold|Approved) \(/ }).allInnerTexts()).join(' | '));
+  await page.getByRole('button', { name: /^Approved \(2\)/ }).click();
+  const mew2 = page.locator('.bg-card').filter({ has: page.locator('input[value^="Mew ex"]') }).first();
+  log.push('restocked card header: ' + (await mew2.innerText()).trim().split('\n')[0] + ' | List on Whatnot: ' + await mew2.getByRole('button', { name: 'List on Whatnot' }).count());
+  await page.screenshot({ path: OUT + '/xl-restocked.png', fullPage: true });
+  log.push('restock overflow px: ' + await overflow(page));
+
   // ---- desktop ----
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('button', { name: /^Sold \(3\)/ }).click();
+  await page.getByRole('button', { name: /^Sold \(2\)/ }).click();
   await page.waitForTimeout(400);
   await page.screenshot({ path: OUT + '/xl-snap-desktop.png', fullPage: true });
 

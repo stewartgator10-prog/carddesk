@@ -276,5 +276,6 @@ export async function checkSalesNow(db, userId, deps = {}) {
   const last = Math.max(0, ...accounts.map((a) => Date.parse(a.sales_checked_at || 0) || 0));
   if (Date.now() - last < SALES_CHECK_GAP_MS) throw Object.assign(new MarketplaceError('rate_limited', 'Checked a moment ago. Try again in 30 seconds.'), { status: 429 });
   const r = await runSaleCheck({ db, userId, deps });
+  if (r.busy) throw Object.assign(new MarketplaceError('rate_limited', 'A sale check is already running. Try again in a minute.'), { status: 429 });
   return { checked: r.checked, newSales: r.newSales, ended: r.ended, updated: r.updated, doubleSales: r.doubleSales, problems: r.problems };
 }

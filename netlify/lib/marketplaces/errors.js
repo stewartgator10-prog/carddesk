@@ -23,8 +23,10 @@ export class MarketplaceError extends Error {
 
 export const isMarketplaceError = (e) => e instanceof MarketplaceError;
 
-// HTTP status to send our own browser for an adapter error.
+// HTTP status to send our own browser for an adapter error: one our code chose (err.status, set
+// only by our own checks), else one per code. A marketplace's own HTTP status is never passed on.
 export function httpStatusFor(err) {
   if (!isMarketplaceError(err)) return 500;
+  if ([404, 409, 429].includes(err.status)) return err.status;
   return { reconnect: 409, missing_scope: 409, rate_limited: 429, not_found: 404, rejected: 422, unavailable: 502, not_set_up: 503 }[err.code] || 500;
 }

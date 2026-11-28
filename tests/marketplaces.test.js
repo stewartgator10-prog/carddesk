@@ -22,7 +22,7 @@ const U = 'u1';
 const TOKEN = 'wn_pat_tk_LEAKCHECK_9f8e7d6c5b4a';
 const CARD = 'c0000000-0000-0000-0000-0000000000aa';
 process.env.MARKETPLACE_TOKEN_KEY = crypto.randomBytes(32).toString('base64');
-process.env.WHATNOT_CATEGORY_IDS = JSON.stringify({ pokemon: '1001' });
+delete process.env.WHATNOT_CATEGORY_IDS;
 
 let realFetch;
 beforeEach(() => { resetThrottle(); realFetch = globalThis.fetch; globalThis.fetch = async (u) => { throw new Error(`global fetch called: ${u}`); }; });
@@ -36,10 +36,10 @@ function shop() {
     if (method === 'GET' && path === '/products') return { body: { data: [], next_cursor: null } };
     if (method === 'POST' && path === '/products') return { status: 201, body: fixture('product-created.json', { CARD_ID: body.external_id, CATEGORY_ID: body.category.id }) };
     if (method === 'GET' && /\/variants$/.test(path)) return { body: fixture('variants.json') };
-    if (method === 'GET' && /^\/products\/[^/]+$/.test(path)) return { body: fixture('product-created.json', { CARD_ID: CARD, CATEGORY_ID: '1001' }) };
+    if (method === 'GET' && /^\/products\/[^/]+$/.test(path)) return { body: fixture('product-created.json', { CARD_ID: CARD, CATEGORY_ID: '2' }) };
     if (method === 'PATCH') return { status: 207, body: { variants: [{ id: 'V-1' }], errors: null } };
     if (path === '/inventory/set') return { status: 207, body: { results: body.items.map((i) => ({ variant_id: i.variant_id, idempotency_key: i.idempotency_key, status: 'applied', previous_quantity: 1, new_quantity: i.quantity, warnings: [] })) } };
-    if (path.startsWith('/merchandising/')) return { body: { product_id: 'P-9001', transaction_type: 'buy_it_now', reserved_for_live: false, sudden_death: null } };
+    if (path.startsWith('/merchandising/')) return { body: { product_id: '9001', transaction_type: 'buy_it_now', reserved_for_live: false, sudden_death: null } };
     if (method === 'DELETE') return { status: 204 };
     return null;
   });
@@ -142,7 +142,7 @@ test('list on Whatnot: card must be approved or on eBay; one live Whatnot listin
   const deps = { fetchImpl: wn.fetchImpl, sleep: async () => {} };
   await connectMarketplace(db, U, { marketplace: 'whatnot', token: TOKEN }, deps);
   const l = await createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13 }, deps);
-  assert.equal(l.status, 'active'); assert.equal(l.external_id, 'P-9001'); assert.equal(Number(l.price), 13); assert.equal(l.inventory_id, 'inv1');
+  assert.equal(l.status, 'active'); assert.equal(l.external_id, '9001'); assert.equal(Number(l.price), 13); assert.equal(l.inventory_id, 'inv1');
   assert.equal(l.raw, undefined);
   const eb = db.tables.marketplace_listings.find((x) => x.marketplace === 'ebay');
   assert.equal(eb.external_id, '4071'); assert.equal(eb.status, 'active');
@@ -160,7 +160,7 @@ test('a failed Whatnot listing is kept with the reason, and the retry adopts the
   const failing = async (url, init) => (String(url).includes('/merchandising/') ? new Response(JSON.stringify({ detail: 'needs an image' }), { status: 422 }) : ok.fetchImpl(url, init));
   await assert.rejects(createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13 }, { ...deps, fetchImpl: failing }), /needs an image/);
   const failed = db.tables.marketplace_listings.filter((x) => x.marketplace === 'whatnot');
-  assert.equal(failed.length, 1); assert.equal(failed[0].status, 'failed'); assert.equal(failed[0].external_id, 'P-9001');
+  assert.equal(failed.length, 1); assert.equal(failed[0].status, 'failed'); assert.equal(failed[0].external_id, '9001');
   assert.equal(failed[0].last_error, 'Whatnot said: needs an image');
   ok.calls.length = 0;
   const l = await createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13 }, deps);
@@ -254,7 +254,7 @@ test('two creates of the same card at once: the card is claimed first, so only o
   assert.equal(lost.status, 409); assert.match(lost.message, /already being listed on Whatnot|already on Whatnot/);
   assert.equal(wn.calls.filter((c) => c.method === 'POST' && c.path === '/products').length, 1);
   const rows = db.tables.marketplace_listings.filter((x) => x.marketplace === 'whatnot');
-  assert.deepEqual(rows.map((r) => [r.status, r.external_id]), [['active', 'P-9001']]);
+  assert.deepEqual(rows.map((r) => [r.status, r.external_id]), [['active', '9001']]);
 });
 
 test('a claim left by a create that was cut off expires, and the next create goes ahead', async () => {
@@ -271,12 +271,12 @@ test('a claim left by a create that was cut off expires, and the next create goe
   assert.deepEqual(db.tables.marketplace_listings.filter((x) => x.marketplace === 'whatnot').map((x) => x.status), ['active']);
 });
 
-test('Whatnot listing is offered only for games with a Whatnot category', async () => {
-  assert.deepEqual(readyGames('whatnot', { WHATNOT_CATEGORY_IDS: '{"pokemon":"1001"}' }), ['pokemon']);
-  assert.deepEqual(readyGames('whatnot', {}), []);
+test('Whatnot listing is offered for every card game Whatnot has a category for (not sports)', async () => {
+  assert.deepEqual(readyGames('whatnot', {}), ['pokemon', 'mtg', 'yugioh', 'lorcana', 'one_piece', 'other']);
+  assert.ok(!readyGames('whatnot', {}).includes('sports'));
   const db = world();
   const wn = (await listMarketplaces(db, U)).find((m) => m.marketplace === 'whatnot');
-  assert.equal(wn.categoryReady, true); assert.deepEqual(wn.readyGames, ['pokemon']);
+  assert.equal(wn.categoryReady, true); assert.ok(wn.readyGames.includes('pokemon'));
 });
 
 test('listing reads page past Supabase\'s 1,000-row cap: a cross-listed card past row 1,000 is still found', async () => {

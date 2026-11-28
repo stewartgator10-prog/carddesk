@@ -214,8 +214,9 @@ export function summarizeTrial(rows) {
 // ---------- cards that are live on eBay ----------
 // What a live card has that eBay doesn't show yet. ebay_live holds the title and description eBay
 // has; photos are out of date when eBay's copies were cleared by a photo change.
+// A sold-out card has nothing live on eBay to change, so it has none.
 export function liveChanges(item) {
-  if (item?.status !== 'listed') return [];
+  if (item?.status !== 'listed' || isSoldOut(item)) return [];
   const live = item.ebay_live || {};
   const same = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
   const out = [];

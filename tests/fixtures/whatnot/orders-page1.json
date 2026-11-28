@@ -1,5 +1,5 @@
 { "data": [
-  { "id": "O-2", "url": "https://www.whatnot.com/order/O-2", "status": "pending_fulfillment", "show_id": null, "transaction_type": "buy_it_now", "buyer": null,
+  { "id": "123456", "url": "https://www.whatnot.com/dashboard/orders/123456", "status": "pending_fulfillment", "show_id": null, "transaction_type": "buy_it_now", "buyer": null,
     "amounts": { "subtotal": { "amount": "14.00", "currency": "USD" }, "shipping": { "amount": "4.50", "currency": "USD" }, "tax": { "amount": "0.00", "currency": "USD" }, "applied_discount": null, "total": { "amount": "18.50", "currency": "USD" } },
     "created_at": "2026-11-28T14:55:00.000Z", "updated_at": "2026-11-28T14:56:00.000Z", "cancelled_at": null }
 ], "next_cursor": "c2" }

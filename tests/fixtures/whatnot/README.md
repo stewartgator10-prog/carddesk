@@ -1,5 +1,9 @@
-# Whatnot fixtures (GUESSES)
+# Whatnot fixtures
 
-Shapes follow the saved OpenAPI spec (`docs/marketplaces/whatnot-api/openapi.json`) but have NOT
-been checked against a live Whatnot shop. Ids, URLs and error bodies are made up. Replace them with
-real responses (tokens removed) once the confirm list in `docs/marketplaces/whatnot.md` is done.
+Shapes and id formats follow the saved OpenAPI spec (`docs/marketplaces/whatnot-api/openapi.json`,
+Seller API v2): numeric string ids for products, orders and order items, `Money` as
+`{ amount: "14.00", currency: "USD" }`, pages as `{ data, next_cursor }`, 207 batch results for
+`PATCH /products/{id}/variants` and `POST /inventory/set`, and the only documented error body
+(`HTTPValidationError`, for 422). Values are made up and have not come from a live Whatnot shop;
+replace them with real responses (tokens removed) once the live checks in
+`docs/marketplaces/whatnot.md` are done.

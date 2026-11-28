@@ -1,7 +1,10 @@
 {
-  "401": { "detail": "Invalid or expired token" },
-  "403": { "detail": "Token is missing scope read:orders" },
-  "404": { "detail": "Product not found" },
-  "422": { "detail": [ { "loc": ["body", "category", "id"], "msg": "category is required", "type": "missing" } ] },
-  "429": { "detail": "Too many requests" }
+  "_note": "Error bodies per the spec: only 422 has one (HTTPValidationError). 401/403/404/409/429 document none.",
+  "401": null,
+  "403": null,
+  "404": null,
+  "409": null,
+  "422": { "detail": [ { "loc": ["body", "category", "id"], "msg": "String should match pattern '^[1-9][0-9]{0,18}$'", "type": "string_pattern_mismatch" } ] },
+  "422-not-ready": { "detail": [ { "loc": ["body", "description"], "msg": "A description is required to publish", "type": "value_error" } ] },
+  "429": null
 }

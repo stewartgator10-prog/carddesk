@@ -139,13 +139,14 @@ export default function MarketplacesPanel({ plan = null }) {
         <Store size={18} style={{ color: 'var(--accent)' }} />
         <h2 className="display-font" style={{ fontSize: '1.2rem', margin: 0 }}>WHATNOT</h2>
         <span className="ink-dim" style={{ fontSize: '0.8rem', flex: 1, minWidth: 140 }}>
-          {list == null ? 'Loading…' : wn.connected
-            ? <>Connected as <b>@{wn.username}</b> · last checked for sales {ago(wn.salesCheckedAt)} · {wn.activeCount} card{wn.activeCount === 1 ? '' : 's'} listed</>
-            : 'Not connected'}
+          {list == null ? 'Loading…' : !wn.connected ? 'Not connected'
+            : wn.status === 'reconnect'
+              ? <><b className="accent-amber">Needs a new token</b> for @{wn.username}{wn.salesCheckedAt ? ` · sales last checked ${ago(wn.salesCheckedAt)}` : ''} · {wn.activeCount} card{wn.activeCount === 1 ? '' : 's'} listed</>
+              : <>Connected as <b>@{wn.username}</b> · last checked for sales {ago(wn.salesCheckedAt)} · {wn.activeCount} card{wn.activeCount === 1 ? '' : 's'} listed</>}
         </span>
         {wn.connected && <>
-          <button className="btn-ghost" onClick={checkNow} disabled={!!busy} style={{ padding: '6px 10px', fontSize: '0.75rem', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            {busy === 'check' ? <Loader size={13} className="spin" /> : <RefreshCw size={13} />} Check for sales now</button>
+          {wn.status !== 'reconnect' && <button className="btn-ghost" onClick={checkNow} disabled={!!busy} style={{ padding: '6px 10px', fontSize: '0.75rem', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            {busy === 'check' ? <Loader size={13} className="spin" /> : <RefreshCw size={13} />} Check for sales now</button>}
           <button className="btn-ghost" onClick={disconnect} disabled={!!busy} title="Disconnect Whatnot" aria-label="Disconnect Whatnot" style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center' }}><Unlink size={14} /></button>
         </>}
       </div>

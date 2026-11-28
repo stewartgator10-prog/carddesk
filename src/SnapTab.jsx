@@ -246,7 +246,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
     if (!ch.length) return;
     const n = listingPhotoPaths(item).length;
     const lines = [
-      ch.includes('photos') && `Photos: replaced with these ${n} photo${n === 1 ? '' : 's'}.`,
+      ch.includes('photos') && `Photos: replaced with ${n === 1 ? 'this photo' : `these ${n} photos`}.`,
       ch.includes('title') && `Title: "${item.title}"`,
       ch.includes('description') && `Description: replaced with the text on this card.${item.imported_from_ebay_at ? ' The old listing\'s layout and styling are not kept.' : ''}`,
     ].filter(Boolean);
@@ -331,7 +331,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
     const price = parseMoney(raw);
     if (!(price >= 1)) { setMsg({ type: 'error', text: 'Enter a Whatnot price of at least $1.00, e.g. 12.50' }); return; }
     const n = photoCount(it); const q = Number(it.quantity) || 1;
-    if (!(await askConfirm(`List on Whatnot now?\n\n${it.title} · ${money(price)} · Qty ${q} · ${WN_CONDITIONS[it.condition] || 'Near Mint'} · ${n} photo${n === 1 ? '' : 's'}\n\nIt goes live in your Whatnot shop as Buy It Now right away.`,
+    if (!(await askConfirm(`List on Whatnot now?\n\n${it.title} · ${money(price)} · Qty ${q} · ${it.extraction?.graded ? 'Graded' : WN_CONDITIONS[it.condition] || 'Near Mint'} · ${n} photo${n === 1 ? '' : 's'}\n\nIt goes live in your Whatnot shop as Buy It Now right away.`,
       { title: 'List on Whatnot', confirmLabel: 'List on Whatnot' }))) return;
     setEbayBusy({ label: 'Listing on Whatnot', done: 0, total: 1 });
     const r = await createOnWhatnot(it, price);
@@ -395,13 +395,22 @@ export default function SnapTab({ userId, settings, setSettings }) {
     }
     if (!Number.isInteger(q) || q < 1 || q > 999) { setMsg({ type: 'error', text: 'Enter a whole number from 1 to 999. To stop selling, end the listing.' }); return false; }
     const live = (listingsByCard.get(it.id) || []).filter((l) => l.status === 'active');
-    if (!live.length) { await save(it.id, { quantity: q }); return true; }
+    if (!live.length) {
+      // Restocking a card that sold out: it can be listed again. A card whose eBay listing ended goes
+      // back to Approved so Check and Publish lists it anew.
+      if (!isSoldOut(it)) { await save(it.id, { quantity: q }); return true; }
+      const relist = it.status === 'listed';
+      await save(it.id, { quantity: q, sold_out_at: null, ...(relist ? { status: 'approved', publish_state: null, publish_check: null, publish_error: null } : {}) });
+      const how = [relist || it.status === 'approved' ? 'Check and Publish for eBay' : null, whatnotOn ? 'List on Whatnot' : null].filter(Boolean).join(' or ');
+      setMsg({ type: 'ok', text: `Stock is ${q}. This card is for sale again${relist ? ' and back in Approved' : ''}: list it with ${how}.` });
+      return true;
+    }
     const where = [...new Set(live.map((l) => (l.marketplace === 'ebay' ? 'eBay' : 'Whatnot')))].join(' and ');
     if (!(await askConfirm(`Change stock to ${q} on ${where}?`, { title: 'Change quantity', confirmLabel: `Change on ${where}` }))) return false;
     const r = await postJson('/api/marketplace-listings', { action: 'stock', snapItemId: it.id, quantity: q }).catch((e) => ({ ok: false, data: { error: e.message } }));
     if (!r.ok) { setMsg({ type: 'error', text: r.data.error || `Failed (${r.status})` }); return false; }
     patchLocal(it.id, { quantity: q, sold_out_at: null });
-    const bad = r.data.results.filter((x) => !x.ok);
+    const bad = (r.data.results || []).filter((x) => !x.ok);
     setMsg(bad.length ? { type: 'error', text: `Stock is ${q}, but ${bad.map((b) => `${b.marketplace === 'ebay' ? 'eBay' : 'Whatnot'} didn't change: ${b.error}`).join(' | ')}` } : { type: 'ok', text: `Stock is ${q} on ${where}.` });
     await loadMarketplaces();
     return true;
@@ -627,7 +636,13 @@ function SnapCard({ it, listings = [], whatnotOn = false, mp_ = {}, photo, photo
           {it.imported_from_ebay_at && <div className="ink-faint" style={{ fontSize: '0.65rem' }}>Brought in from eBay {new Date(it.imported_from_ebay_at).toLocaleDateString()}</div>}
         </div>
       )}
-      {it.status === 'listed' && (
+      {it.status === 'listed' && isSoldOut(it) && (
+        <div style={{ display: 'grid', gap: 4 }}>
+          <div className="ink-dim" style={{ fontSize: '0.72rem' }}>Sold out, so eBay edits are off for this card. To sell it again, set the quantity above 0.</div>
+          <QtyField it={it} onQuantity={mp_.onQuantity} />
+        </div>
+      )}
+      {it.status === 'listed' && !isSoldOut(it) && (
         <div style={{ display: 'grid', gap: 4 }}>
           <input className="bg-input" style={inp} value={d.title || ''} aria-label="eBay title" placeholder="eBay title" maxLength={80} onChange={(e) => field('title', e.target.value)} onBlur={() => d.title !== it.title && commit({ title: d.title })} />
           <div className="ink-faint" style={{ fontSize: '0.65rem' }}>Title {String(d.title || '').length}/80</div>
@@ -863,7 +878,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
     const res = await apiFetch('/api/snap-trial?n=60');
     const plan = await res.json().catch(() => ({}));
     if (!res.ok) { setErr(plan.error || `Couldn't start (${res.status})`); return; }
-    if (!plan.items?.length) { setErr('No single-card listings with photos to test on. Sync your eBay listings first.'); return; }
+    if (!plan.items?.length || !plan.models?.length) { setErr('No single-card listings with photos to test on. Sync your eBay listings first.'); return; }
     const est = plan.models.map((m) => `${ARM_LABELS[m]} about ${fee(plan.estimate[m])}`).join(', ');
     if (!(await askConfirm(`Run ${plan.items.length} of your listing photos through ${plan.models.length === 2 ? 'both models' : 'each option'}?\n\nEstimated cost: ${est}.\n\nBilled to your Anthropic API key.`, { title: 'Model trial', confirmLabel: 'Run the trial' }))) return;
     const id = `t${Date.now()}`;
@@ -1173,7 +1188,9 @@ function ImportPanel({ onDone, onPhotosChanged }) {
   const load = useCallback(async () => {
     const res = await apiFetch('/api/listing-import');
     const data = await res.json().catch(() => ({}));
-    if (res.ok) setInfo(data); else setErr(data.error || `Couldn't check eBay listings (${res.status})`);
+    // Lists are read defensively: an older or partial answer must not break the tab.
+    const ids = (v) => (Array.isArray(v) ? v : []);
+    if (res.ok) setInfo({ ...data, pending: ids(data.pending), needsFullSize: ids(data.needsFullSize) }); else setErr(data.error || `Couldn't check eBay listings (${res.status})`);
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -1189,7 +1206,7 @@ function ImportPanel({ onDone, onPhotosChanged }) {
       for (let i = 0; i < ids.length; i += 4) {
         const r = await postJson('/api/listing-import', { action: 'full_size', ids: ids.slice(i, i + 4) }).catch((e) => ({ ok: false, data: { error: e.message } }));
         if (!r.ok) { failed.push({ id: '', error: r.data.error || `stopped (${r.status})` }); break; }
-        failed.push(...r.data.results.filter((x) => !x.ok));
+        failed.push(...(r.data.results || []).filter((x) => !x.ok));
         setFix({ done: Math.min(i + 4, ids.length), total: ids.length, failed: [...failed] });
       }
       onPhotosChanged?.();
@@ -1206,7 +1223,7 @@ function ImportPanel({ onDone, onPhotosChanged }) {
     for (let i = 0; i < ids.length; i += 4) {
       const r = await postJson('/api/listing-import', { item_ids: ids.slice(i, i + 4) }).catch((e) => ({ ok: false, data: { error: e.message } }));
       if (!r.ok) { setErr(r.data.error || `Import stopped (${r.status})`); break; }
-      failed.push(...r.data.results.filter((x) => !x.ok));
+      failed.push(...(r.data.results || []).filter((x) => !x.ok));
       setRun({ done: Math.min(i + 4, ids.length), total: ids.length, failed: [...failed] });
     }
     await onDone();
