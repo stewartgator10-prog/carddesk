@@ -7,7 +7,7 @@
 
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin } from '../lib/ebay-seller.js';
-import { recompute, markInventorySold, releaseInventory } from './ebay-sync-orders.js';
+import { recompute, markInventorySold, releaseInventory } from '../lib/ebay-orders.js';
 import { requireFeature } from '../lib/billing.js';
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

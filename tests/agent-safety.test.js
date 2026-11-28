@@ -108,3 +108,19 @@ test('bulk scanner reads the asking price, not the card number', () => {
 test('a $0 cost basis still sets a floor', () => {
   assert.equal(costForListing({ itemId: '5', title: 'x' }, [{ ebayItemId: '5', costBasis: '0' }]), 0);
 });
+
+test('the marketplace code never reaches Whatnot or eBay on its own: every call goes through an injected fetch', async () => {
+  const { whatnot } = await import('../netlify/lib/marketplaces/whatnot.js');
+  const { handleSales } = await import('../netlify/lib/sell-once.js');
+  const { fakeDb } = await import('./fake-db.js');
+  const real = globalThis.fetch;
+  let reached = null;
+  globalThis.fetch = async (u) => { reached = String(u); throw new Error('global fetch is off in tests'); };
+  try {
+    const injected = async () => new Response(JSON.stringify({ detail: 'nope' }), { status: 401 });
+    await assert.rejects(whatnot.connect(null, 'u', { token: 'wn_pat_tk_x' }, { fetchImpl: injected, sleep: async () => {} }), /didn't accept/);
+    const db = fakeDb({ marketplace_listings: [], marketplace_orders: [] });
+    await handleSales({ db, userId: 'u', marketplace: 'whatnot', sales: [{ orderId: 'o', lineId: 'l', externalId: 'unknown', quantity: 1 }] });
+    assert.equal(reached, null);
+  } finally { globalThis.fetch = real; }
+});

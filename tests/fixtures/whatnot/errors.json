@@ -1,0 +1,7 @@
+{
+  "401": { "detail": "Invalid or expired token" },
+  "403": { "detail": "Token is missing scope read:orders" },
+  "404": { "detail": "Product not found" },
+  "422": { "detail": [ { "loc": ["body", "category", "id"], "msg": "category is required", "type": "missing" } ] },
+  "429": { "detail": "Too many requests" }
+}

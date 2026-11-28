@@ -1,5 +1,7 @@
+import crypto from 'node:crypto';
 // Tiny in-memory stand-in for the parts of supabase-js the functions use.
-export function fakeDb(tables, keys, { files = {} } = {}) {
+const AUTO_ID = ['marketplace_listings', 'marketplace_accounts'];   // tables whose id the database fills in
+export function fakeDb(tables, keys, { files = {}, signedUrls = false } = {}) {
   const t = (name) => (tables[name] ||= []);
   return {
     tables,
@@ -14,10 +16,11 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
           files[path] = Buffer.from(body); return { data: { path }, error: null };
         },
         remove: async (paths) => { paths.forEach((p) => delete files[p]); return { data: paths, error: null }; },
+        createSignedUrl: !signedUrls ? undefined : async (path, secs) => ({ data: { signedUrl: `https://storage.example/sign/${path}?expires=${secs}` }, error: null }),
       }),
     },
     from(name) {
-      const filters = []; let op = 'select', payload = null, single = false, conflict = null, returning = false;
+      const filters = []; let op = 'select', payload = null, single = false, conflict = null, returning = false, ignoreDup = false;
       const b = {
         select() { if (op !== 'select') returning = true; return b; },
         eq(c, v) { filters.push((r) => r[c] === v); return b; },
@@ -25,13 +28,15 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
         is(c, v) { filters.push((r) => r[c] === v); return b; },
         not(c, op, v) { filters.push((r) => (op === 'is' && v === null ? r[c] != null : r[c] !== v)); return b; },
         gte(c, v) { filters.push((r) => r[c] >= v); return b; },
+        lt(c, v) { filters.push((r) => r[c] < v); return b; },
+        neq(c, v) { filters.push((r) => r[c] !== v); return b; },
         ilike(c, pat) { const re = new RegExp(`^${pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`, 'i'); filters.push((r) => re.test(r[c] ?? '')); return b; },
         insert(rows) { op = 'insert'; payload = Array.isArray(rows) ? rows : [rows]; return b; },
         delete() { op = 'delete'; return b; },
         order() { return b; }, limit() { return b; },
         maybeSingle() { single = true; return b; },
         update(p) { op = 'update'; payload = p; return b; },
-        upsert(rows, o) { op = 'upsert'; payload = Array.isArray(rows) ? rows : [rows]; conflict = o.onConflict.split(','); return b; },
+        upsert(rows, o) { op = 'upsert'; payload = Array.isArray(rows) ? rows : [rows]; conflict = o.onConflict.split(','); ignoreDup = !!o.ignoreDuplicates; return b; },
         then(res, rej) {
           try {
             const rows = t(name);
@@ -50,14 +55,18 @@ export function fakeDb(tables, keys, { files = {} } = {}) {
               return Promise.resolve({ data: null, error: null }).then(res, rej);
             }
             if (op === 'insert') {
-              rows.push(...payload.map((p) => ({ ...p })));
+              rows.push(...payload.map((p) => ({ ...(AUTO_ID.includes(name) && p.id == null ? { id: crypto.randomUUID() } : {}), ...p })));
               return Promise.resolve({ data: null, error: null }).then(res, rej);
             }
+            const written = [];
             for (const p of payload) {
               const hit = rows.find((r) => conflict.every((k) => r[k] === p[k]));
-              if (hit) Object.assign(hit, p); else rows.push({ match_status: 'unmatched', ...p });
+              if (hit) { if (!ignoreDup) { Object.assign(hit, p); written.push(hit); } } else {
+                const row = name === 'ebay_order_lines' ? { match_status: 'unmatched', ...p } : { ...(AUTO_ID.includes(name) && p.id == null ? { id: crypto.randomUUID() } : {}), ...p };
+                rows.push(row); written.push(row);
+              }
             }
-            return Promise.resolve({ data: null, error: null }).then(res, rej);
+            return Promise.resolve({ data: returning ? written.map((r) => ({ ...r })) : null, error: null }).then(res, rej);
           } catch (e) { return Promise.resolve({ data: null, error: e }).then(res, rej); }
         },
       };

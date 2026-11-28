@@ -13,9 +13,11 @@ Plan: the lowest plan that includes it on Tyche Cards.
 | Publish to eBay with the seller's own policies | Free | Live | |
 | Edit live eBay listings (photos, title, description) | Basic | Live | |
 | Import listings made before Tyche Cards | Elite | Live | |
-| **List on Whatnot** (Buy It Now, auction, show inventory) | Pro | Next | docs/marketplaces/whatnot.md |
-| List on more marketplaces (TCGplayer, Shopify, Mercari, CollX) | Pro | Later | one adapter per marketplace |
-| One stock count across marketplaces (sell once, delist everywhere) | Pro | Next | needed as soon as there are two marketplaces |
+| **List on Whatnot** (Buy It Now in shop; shows and auctions later) | Pro | Specced | docs/specs/cross-listing-whatnot.md |
+| List on Shopify and TCGplayer | Pro | Next | adapters on the marketplace layer in docs/specs/cross-listing-whatnot.md |
+| List on more marketplaces (Mercari, CollX) | Pro | Later | one adapter per marketplace |
+| One stock count across marketplaces (sell once, delist everywhere) | Pro | Specced | docs/specs/cross-listing-whatnot.md |
+| Marketplace tokens encrypted at rest (Whatnot now, eBay next) | Free | Specced | docs/specs/cross-listing-whatnot.md, open question 1 |
 | Bulk scanner support (feeder scanners, front and back pairs) | Basic | Later | |
 | Sports cards | Free | Later | different eBay category and specifics |
 | Graded slab details (cert lookup, label read) | Basic | Idea | |

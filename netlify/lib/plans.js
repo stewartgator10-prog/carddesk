@@ -16,7 +16,7 @@ export const PLANS = {
     features: ['300 cards a month', 'Everything in Free', 'Edit live eBay listings', 'Email support'] },
   pro: { name: 'Pro', month: 39, year: 390, cards: 1000, popular: true,
     blurb: 'Run the whole selling side.',
-    features: ['1,000 cards a month', 'Everything in Basic', 'Repricer with market and comps', 'Best Offer and promotion on every listing', 'Collection tracking with sell alerts', 'Profit per card and sales matching'] },
+    features: ['1,000 cards a month', 'Everything in Basic', 'Repricer with market and comps', 'Best Offer and promotion on every listing', 'Collection tracking with sell alerts', 'Profit per card and sales matching', 'List on Whatnot too, sold once everywhere'] },
   elite: { name: 'Elite', month: 79, year: 790, cards: 3000,
     blurb: 'For high-volume sellers and shops.',
     features: ['3,000 cards a month', 'Everything in Pro', 'Buy offers from a binder photo', 'AI app connector (Claude, Muse and others)', 'Import your existing eBay listings', 'Priority support'] },
@@ -29,6 +29,7 @@ export const FEATURE_PLAN = {
   automation: 'pro',     // Best Offer and promotion on new listings
   collection: 'pro',
   profit: 'pro',
+  cross_list: 'pro',   // listing on Whatnot (and later Shopify, TCGplayer)
   buy_offers: 'elite',
   connector: 'elite',
   import: 'elite',
@@ -40,6 +41,7 @@ export const FEATURE_LABELS = {
   automation: 'Automatic Best Offer and promotion',
   collection: 'Collection tracking',
   profit: 'Profit and sales tracking',
+  cross_list: 'Listing on more marketplaces',
   buy_offers: 'Buy offers',
   connector: 'The AI app connector',
   import: 'Importing existing eBay listings',
