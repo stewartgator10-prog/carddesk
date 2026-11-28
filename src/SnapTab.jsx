@@ -652,7 +652,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
 
   async function run() {
     setErr(null);
-    const res = await apiFetch('/api/snap-trial?n=30');
+    const res = await apiFetch('/api/snap-trial?n=60');
     const plan = await res.json().catch(() => ({}));
     if (!res.ok) { setErr(plan.error || `Couldn't start (${res.status})`); return; }
     if (!plan.items?.length) { setErr('No single-card listings with photos to test on. Sync your eBay listings first.'); return; }
@@ -691,7 +691,7 @@ function TrialPanel({ settings, setSettings, onUsage }) {
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 className="display-font" style={{ margin: 0, fontSize: '1.3rem' }}>MODEL TRIAL</h2>
-          <div className="ink-dim" style={{ fontSize: '0.75rem' }}>Runs up to 30 of your own eBay listing photos through both models and checks each answer against your listing title.</div>
+          <div className="ink-dim" style={{ fontSize: '0.75rem' }}>Runs up to 60 of your own eBay listing photos through both models and checks each answer against your listing title.</div>
         </div>
         {running
           ? <button className="btn-ghost" onClick={() => { stop.current = true; }} style={{ padding: '8px 14px' }}><Loader size={14} className="spin" /> {running.done}/{running.total} · Stop</button>
