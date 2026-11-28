@@ -4,6 +4,7 @@
 
 export const SNAP_DEFAULTS = {
   snapModel: 'claude-opus-5-5',
+  snapAutoRoute: true,         // read with Haiku first; use snapModel only for the hard cards (see escalationReason)
   snapMarkupPct: 0,       // % over market price
   snapMinPrice: 0.99,     // never list below this
   snapEnding: '0.89',     // round up to this ending: '0.89' | '0.98' | '0.99' | '0.49' | 'cents'
@@ -166,9 +167,13 @@ const localOf = (s) => String(s || '').split('/')[0].toLowerCase().replace(/^([a
 export function scoreTrial({ title, read, catalog }) {
   const t = new Set(tokens(title));
   const nameTok = tokens(read?.card_name);
-  const name_ok = nameTok.length > 0 && nameTok.every((x) => t.has(x));
   const tn = titleNumber(title);
   const number_ok = tn ? !!read?.collector_number && localOf(read.collector_number) === localOf(tn) : null;
+  // A card printed in another language counts as read right when its number matches and the title
+  // names that language: the English title can't be compared with a Japanese or Korean name.
+  const lang = String(read?.language || '');
+  const foreignOk = !/^(english|unknown|)$/i.test(lang) && number_ok === true && new RegExp(`\\b${lang.replace(/[^a-z]/gi, '')}\\b`, 'i').test(String(title || ''));
+  const name_ok = (nameTok.length > 0 && nameTok.every((x) => t.has(x))) || foreignOk;
   const setTok = tokens(catalog?.setName || read?.set_name);
   const set_ok = setTok.length ? setTok.filter((x) => t.has(x)).length / setTok.length >= 0.6 : null;
   const catTok = tokens(catalog?.name);

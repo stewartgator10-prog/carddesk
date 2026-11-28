@@ -8,6 +8,9 @@ import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, json } from '../lib/ebay-seller.js';
 import { pickTrialListings, runTrialCase } from '../lib/snap-identify.js';
 import { SNAP_MODELS } from '../lib/card-vision.js';
+// The trial compares each model alone and the Haiku-first routing ('auto').
+const ARMS = [...SNAP_MODELS, 'auto'];
+const AUTO_OPUS_SHARE = 0.35;   // rough share of cards the routing sends on to Opus, for the estimate
 import { costOf } from '../lib/ai-usage.js';
 
 // Rough per-card size for the estimate: a ~1,500px photo plus the prompt in, a short JSON answer
@@ -27,14 +30,16 @@ export default async (req) => {
         .select('item_id, title, price, image_url').eq('user_id', userId).eq('status', 'Active');
       if (error) throw new Error(error.message);
       const items = pickTrialListings(data || [], n);
-      const estimate = Object.fromEntries(SNAP_MODELS.map((m) => [m, Math.round(costOf(m, EST_USAGE) * items.length * 1e4) / 1e4]));
-      return json(200, { items, models: SNAP_MODELS, estimate });
+      const one = (m) => costOf(m, EST_USAGE) * items.length;
+      const estimate = Object.fromEntries(SNAP_MODELS.map((m) => [m, Math.round(one(m) * 1e4) / 1e4]));
+      estimate.auto = Math.round((one('claude-haiku-5-5') + AUTO_OPUS_SHARE * one('claude-opus-5-5')) * 1e4) / 1e4;
+      return json(200, { items, models: ARMS, estimate });
     }
 
     if (req.method === 'POST') {
       const { trialId, model, itemId } = (await req.json().catch(() => null)) || {};
       if (!trialId || !/^[\w-]{4,64}$/.test(String(trialId))) return json(400, { error: 'trialId is required' });
-      if (!SNAP_MODELS.includes(model)) return json(400, { error: `model must be one of ${SNAP_MODELS.join(', ')}` });
+      if (!ARMS.includes(model)) return json(400, { error: `model must be one of ${ARMS.join(', ')}` });
       const { data: listing, error } = await db.from('ebay_listings')
         .select('item_id, title, price, image_url').eq('user_id', userId).eq('item_id', String(itemId)).maybeSingle();
       if (error) throw new Error(error.message);
