@@ -6,6 +6,10 @@ import { adapterFor, ACCOUNT_MARKETPLACES, MARKETPLACE_LABELS, contextFor } from
 import { MarketplaceError, isMarketplaceError } from './errors.js';
 import { seal, hasBoxKey } from '../secret-box.js';
 import { runSaleCheck } from '../sell-once.js';
+import { isSoldOut, LISTABLE_GAMES } from '../snap-logic.js';
+import { categoryIdFor } from './whatnot.js';
+import crypto from 'node:crypto';
+import { allRows } from '../db-pages.js';
 
 async function must(p) { const { data, error } = await p; if (error) throw new Error(error.message); return data; }
 const nowIso = () => new Date().toISOString();
@@ -19,9 +23,17 @@ export function publicListing(l) {
   return rest;
 }
 
+// The games a card can be listed for on this marketplace (Whatnot needs a category per game).
+export function readyGames(marketplace, env = process.env) {
+  if (marketplace !== 'whatnot') return LISTABLE_GAMES;
+  return LISTABLE_GAMES.filter((g) => categoryIdFor(g, env));
+}
+
 function publicAccount(marketplace, a, activeCount) {
-  if (!a) return { marketplace, connected: false, activeCount };
+  const games = readyGames(marketplace);
+  if (!a) return { marketplace, connected: false, activeCount, readyGames: games, categoryReady: games.length > 0 };
   return {
+    readyGames: games, categoryReady: games.length > 0,
     marketplace, connected: true, username: a.external_username || null, status: a.status || 'connected', lastError: a.last_error || null,
     salesCheckedAt: a.sales_checked_at || null, activeCount, connectedAt: a.created_at || null,
     settings: { shippingProfileId: a.settings?.shipping_profile_id || null, shippingProfiles: a.settings?.shipping_profiles || [] },
@@ -32,7 +44,7 @@ export async function listMarketplaces(db, userId) {
   const [ebay, accounts, live] = await Promise.all([
     must(db.from('ebay_accounts').select('ebay_username, last_synced_at, orders_synced_at').eq('user_id', userId).maybeSingle()),
     must(db.from('marketplace_accounts').select('marketplace, external_username, status, last_error, sales_checked_at, settings, created_at').eq('user_id', userId)),
-    must(db.from('marketplace_listings').select('marketplace, status').eq('user_id', userId).in('status', LIVE)),
+    allRows(() => db.from('marketplace_listings').select('id, marketplace, status').eq('user_id', userId).in('status', LIVE).order('id')),
   ]);
   const count = (m) => live.filter((l) => l.marketplace === m).length;
   return [
@@ -131,43 +143,77 @@ async function ensureEbayRow(db, userId, card) {
   }, { onConflict: 'user_id,marketplace,external_id' }));
 }
 
+// A 'creating' claim older than this is from a run that was cut off; the next create takes over
+// (the adapter finds the product by our card id if that run did make one).
+export const STALE_CLAIM_MS = 10 * 60_000;
+
 export async function createCrossListing(db, userId, { marketplace, snapItemId, price, quantity }, deps = {}) {
   if (!ACCOUNT_MARKETPLACES.includes(marketplace)) throw new MarketplaceError('rejected', 'List on eBay with Check and Publish on the card.');
   const card = await loadCard(db, userId, snapItemId);
   if (!['approved', 'listed'].includes(card.status)) throw new MarketplaceError('rejected', 'Approve the card first.');
+  if (isSoldOut(card)) throw Object.assign(new MarketplaceError('rejected', 'This card has sold out. Set its quantity above 0 before listing it again.'), { status: 409 });
   if (card.photo_crop) throw new MarketplaceError('rejected', 'This card only has a binder-page photo. Replace it with a photo of the card itself first.');
   if (!card.title) throw new MarketplaceError('rejected', 'The card needs a title first.');
-  const mine = await must(db.from('marketplace_listings').select('*').eq('user_id', userId).eq('snap_item_id', card.id).eq('marketplace', marketplace));
+  const now = nowIso();
+  let mine = await must(db.from('marketplace_listings').select('*').eq('user_id', userId).eq('snap_item_id', card.id).eq('marketplace', marketplace));
+  for (const c of mine.filter((l) => l.status === 'creating' && Date.now() - Date.parse(l.updated_at || l.created_at || 0) > STALE_CLAIM_MS)) {
+    await must(db.from('marketplace_listings').update({ status: 'failed', last_error: 'Listing didn\'t finish. Try again.', updated_at: now }).eq('id', c.id).eq('status', 'creating'));
+    c.status = 'failed';
+  }
+  if (mine.some((l) => l.status === 'creating')) throw Object.assign(new MarketplaceError('rejected', `This card is already being listed on ${MARKETPLACE_LABELS[marketplace]}.`), { status: 409 });
   if (mine.some((l) => LIVE.includes(l.status))) throw new MarketplaceError('rejected', `This card is already on ${MARKETPLACE_LABELS[marketplace]}.`);
-  const failed = mine.filter((l) => l.status === 'failed');
-  const adopt = failed.find((l) => l.external_id)?.external_id || null;
-  const qty = Math.max(1, Math.floor(Number(quantity ?? card.quantity ?? 1) || 1));
+  const qty = Math.floor(Number(quantity ?? card.quantity ?? 1));
+  if (!(qty >= 1)) throw Object.assign(new MarketplaceError('rejected', 'Set a quantity of at least 1.'), { status: 409 });
   const p = Number(price ?? card.price);
   const ctx = await contextFor(db, userId, marketplace, deps);
   if (ctx.account.status === 'reconnect') throw new MarketplaceError('reconnect', ctx.account.last_error || `${MARKETPLACE_LABELS[marketplace]} stopped accepting your token. Paste a new one in Marketplaces.`);
   await ensureEbayRow(db, userId, card);
-  const now = nowIso();
+
+  // Claim the card before anything reaches the marketplace: the one-live-listing index lets only
+  // one 'creating' row exist per card and marketplace, so a second create stops here.
+  const claimId = crypto.randomUUID();
+  const { error: claimErr } = await db.from('marketplace_listings').insert({
+    id: claimId, user_id: userId, snap_item_id: card.id, marketplace, status: 'creating', price: p, quantity: qty, created_at: now, updated_at: now,
+  });
+  if (claimErr) throw Object.assign(new MarketplaceError('rejected', `This card is already being listed on ${MARKETPLACE_LABELS[marketplace]}.`), { status: 409 });
+  const failed = mine.filter((l) => l.status === 'failed');
+  const adopt = failed.find((l) => l.external_id)?.external_id || null;
+  // Writes the outcome to the claim row, or to an older row of the same product (an adopted one),
+  // since a product id appears once per seller and marketplace.
+  const settle = async (fields) => {
+    for (const f of failed) await must(db.from('marketplace_listings').delete().eq('id', f.id));
+    const same = fields.external_id ? await must(db.from('marketplace_listings').select('id').eq('user_id', userId).eq('marketplace', marketplace).eq('external_id', fields.external_id)) : [];
+    const target = same.find((x) => x.id !== claimId)?.id;
+    if (target) await must(db.from('marketplace_listings').delete().eq('id', claimId));
+    await must(db.from('marketplace_listings').update(fields).eq('id', target || claimId));
+    return target || claimId;
+  };
   try {
     const r = await adapterFor(marketplace).createListing(ctx, card, { price: p, quantity: qty, adopt, settings: deps.settings || {} });
     const inv = card.ebay_item_id ? await must(db.from('inventory').select('id').eq('user_id', userId).eq('ebay_item_id', card.ebay_item_id)) : [];
-    await must(db.from('marketplace_listings').upsert({
-      user_id: userId, snap_item_id: card.id, inventory_id: inv[0]?.id || null, marketplace, external_id: r.externalId, external_variant_id: r.variantId,
+    // Earlier failed tries are replaced by this listing.
+    const id = await settle({
+      snap_item_id: card.id, inventory_id: inv[0]?.id || null, external_id: String(r.externalId), external_variant_id: r.variantId,
       external_listing_id: r.listingId, url: r.url, price: r.price, currency: 'USD', quantity: r.quantity, status: 'active', ended_reason: null,
-      last_error: null, listed_at: now, ended_at: null, sold_at: null, synced_at: now, updated_at: now,
-    }, { onConflict: 'user_id,marketplace,external_id' }));
-    for (const f of failed.filter((x) => x.external_id !== r.externalId)) await must(db.from('marketplace_listings').delete().eq('id', f.id));
+      last_error: null, listed_at: now, ended_at: null, sold_at: null, synced_at: now, updated_at: nowIso(),
+    });
     if (Number(card.quantity) !== qty) await must(db.from('snap_items').update({ quantity: qty }).eq('id', card.id).eq('user_id', userId));
-    return publicListing(await must(db.from('marketplace_listings').select('*').eq('user_id', userId).eq('marketplace', marketplace).eq('external_id', r.externalId).maybeSingle()));
+    return publicListing(await must(db.from('marketplace_listings').select('*').eq('id', id).maybeSingle()));
   } catch (e) {
     await markReconnect(db, userId, marketplace, e);
     const msg = isMarketplaceError(e) ? e.sellerMessage : 'Something went wrong. Try again.';
-    const row = { user_id: userId, snap_item_id: card.id, marketplace, status: 'failed', last_error: msg, price: p, quantity: qty, updated_at: now };
-    const keep = failed[0];
-    if (e.partial?.externalId) {
-      if (keep && !keep.external_id) await must(db.from('marketplace_listings').delete().eq('id', keep.id));
-      await must(db.from('marketplace_listings').upsert({ ...row, external_id: e.partial.externalId, url: e.partial.url || null }, { onConflict: 'user_id,marketplace,external_id' }));
-    } else if (keep) await must(db.from('marketplace_listings').update(row).eq('id', keep.id));
-    else await must(db.from('marketplace_listings').insert(row));
+    const row = { status: 'failed', last_error: msg, price: p, quantity: qty, updated_at: nowIso() };
+    const keep = failed.find((l) => l.external_id) || failed[0];
+    // A problem recording the failure never hides the marketplace's reason (a stuck claim expires).
+    try {
+      if (e.partial?.externalId) {
+        // The product exists on the marketplace: this row keeps its id so the retry adopts it.
+        await settle({ ...row, snap_item_id: card.id, external_id: String(e.partial.externalId), url: e.partial.url || null });
+      } else if (keep) {
+        await must(db.from('marketplace_listings').update(row).eq('id', keep.id));
+        await must(db.from('marketplace_listings').delete().eq('id', claimId));
+      } else await must(db.from('marketplace_listings').update(row).eq('id', claimId));
+    } catch (w) { console.warn(`recording a failed ${marketplace} listing: ${w.message}`); }
     throw e;
   }
 }

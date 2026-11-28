@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { saleSentence, chipsFor } from '../netlify/lib/marketplace-text.js';
+import { isSoldOut } from '../netlify/lib/snap-logic.js';
 
 const eb = (over = {}) => ({ id: 'e', marketplace: 'ebay', status: 'ended', ended_reason: 'sold_elsewhere', price: 12.5, quantity: 0, ...over });
 const wn = (over = {}) => ({ id: 'w', marketplace: 'whatnot', status: 'sold', price: 12.5, quantity: 0, ...over });
@@ -35,4 +36,19 @@ test('chips: live with price, ended, sold, not listed; the newest per marketplac
   assert.deepEqual(chips.map((c) => [c.text, c.tone]), [['eBay · $12.50 · 3 left', 'live'], ['Whatnot · $12.50', 'live']]);
   assert.deepEqual(chipsFor([eb(), wn()]).map((c) => c.text), ['Ended on eBay', 'Sold on Whatnot']);
   assert.equal(chipsFor([wn({ status: 'failed' })])[0].text, 'Not listed on Whatnot');
+});
+
+test('a listing being made shows as "Listing on Whatnot…" and wins over an older failed try', () => {
+  const chips = chipsFor([
+    { id: 'f', marketplace: 'whatnot', status: 'failed', updated_at: '2026-11-28T10:00:00Z' },
+    { id: 'c', marketplace: 'whatnot', status: 'creating', updated_at: '2026-11-28T09:00:00Z' },
+  ]);
+  assert.deepEqual(chips.map((c) => [c.id, c.text, c.live]), [['c', 'Listing on Whatnot…', false]]);
+});
+
+test('sold out: no stock left, or a sold-out time; cards from before quantity existed are not', () => {
+  assert.equal(isSoldOut({ quantity: 0 }), true);
+  assert.equal(isSoldOut({ quantity: 2, sold_out_at: '2026-11-28T00:00:00Z' }), true);
+  assert.equal(isSoldOut({ quantity: 1 }), false);
+  assert.equal(isSoldOut({}), false);
 });

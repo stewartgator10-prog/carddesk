@@ -3,7 +3,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { decideSale, handleSales, retryPendingEnds, runSaleCheck } from '../netlify/lib/sell-once.js';
+import { decideSale, handleSales, retryPendingEnds, runSaleCheck, STALE_LINE_MS } from '../netlify/lib/sell-once.js';
 import { seal } from '../netlify/lib/secret-box.js';
 import { resetThrottle } from '../netlify/lib/marketplaces/whatnot-client.js';
 import { fakeDb } from './fake-db.js';
@@ -34,7 +34,7 @@ function whatnotShop() {
   });
 }
 
-function world({ quantity = 1, ebay = true, whatnot = true, cardOver = {}, wnOver = {}, ebayOver = {} } = {}) {
+function world({ quantity = 1, ebay = true, whatnot = true, cardOver = {}, wnOver = {}, ebayOver = {}, dbOpts = {} } = {}) {
   const t = '2026-11-20T00:00:00.000Z';
   return fakeDb({
     snap_items: [{ id: CARD, user_id: U, title: 'Pikachu 025/165', status: ebay ? 'listed' : 'approved', quantity, ebay_item_id: ebay ? '4071' : null, sale_note: null, sold_out_at: null, ...cardOver }],
@@ -47,7 +47,7 @@ function world({ quantity = 1, ebay = true, whatnot = true, cardOver = {}, wnOve
     marketplace_accounts: [{ id: 'a1', user_id: U, marketplace: 'whatnot', auth_kind: 'personal_token', access_token_enc: seal('wn_pat_tk_X'), status: 'connected', sales_checked_at: '2026-11-28T14:50:00.000Z', settings: {} }],
     ebay_listings: ebay ? [{ user_id: U, item_id: '4071', status: 'Active', quantity_available: quantity }] : [],
     ebay_accounts: ebay ? [{ id: 'e1', user_id: U, ebay_username: 'jax' }] : [],
-  });
+  }, null, dbOpts);
 }
 const deps = (tr, wn) => ({ fetchImpl: wn.fetchImpl, sleep: async () => {}, byMarketplace: { ebay: { token: 'ebay-token', call: tr.call } } });
 const wnSale = (over = {}) => ({ orderId: 'O-2', lineId: 'OI-1', externalId: 'P-9001', cardId: CARD, quantity: 1, price: 14, at: '2026-11-28T14:55:00.000Z', status: 'pending_fulfillment', url: 'https://www.whatnot.com/order/O-2', ...over });
@@ -213,4 +213,68 @@ test('a 401 from Whatnot marks the account "reconnect" without failing the check
   const n = dead.calls.length;
   await runSaleCheck({ db, userId: U, deps: deps(tr, dead), includeEbay: false });
   assert.equal(dead.calls.length, n);
+});
+
+test('a sale that failed partway is finished by the next check, once, without counting it twice', async () => {
+  // The card update fails once with a passing database error, after the eBay listing was ended.
+  let failNext = true;
+  const failOn = ({ table, op }) => (table === 'snap_items' && op === 'update' && failNext ? (failNext = false, 'connection reset') : null);
+  const db = world({ dbOpts: { failOn } });
+  const tr = trading(); const wn = whatnotShop();
+  await assert.rejects(handleSales({ db, userId: U, marketplace: 'whatnot', sales: [wnSale()], deps: deps(tr, wn) }), /connection reset/);
+  const line = db.tables.marketplace_orders[0];
+  assert.equal(line.handled_at ?? null, null); assert.equal(line.claimed_at, null);   // released for the next check
+  assert.equal(db.tables.snap_items[0].quantity, 1);
+
+  const r = await handleSales({ db, userId: U, marketplace: 'whatnot', sales: [wnSale()], deps: deps(tr, wn) });
+  assert.equal(r.newSales, 1); assert.equal(r.doubleSales, 0);
+  const card = db.tables.snap_items[0];
+  assert.equal(card.quantity, 0); assert.ok(card.sold_out_at);
+  assert.equal(card.sale_note.double_sale, false);
+  assert.deepEqual(card.sale_note.ended, [{ marketplace: 'ebay', ok: true }]);   // ended by the first try, still in the note
+  assert.deepEqual(tr.calls.map((c) => c.name), ['EndFixedPriceItem']);           // eBay was not called again
+  assert.equal(db.tables.inventory[0].status, 'Sold');
+  assert.ok(db.tables.marketplace_orders[0].handled_at);
+  const again = await handleSales({ db, userId: U, marketplace: 'whatnot', sales: [wnSale()], deps: deps(tr, wn) });
+  assert.equal(again.newSales, 0);
+});
+
+test('a line another check is working on is left alone until its claim expires (a run cut off by the time limit)', async () => {
+  const db = world();
+  const tr = trading(); const wn = whatnotShop();
+  const recent = new Date().toISOString();
+  db.tables.marketplace_orders.push({ user_id: U, marketplace: 'whatnot', external_order_id: 'O-2', external_line_id: 'OI-1', quantity: 1, claimed_at: recent, handled_at: null });
+  assert.equal((await handleSales({ db, userId: U, marketplace: 'whatnot', sales: [wnSale()], deps: deps(tr, wn) })).newSales, 0);
+  assert.equal(tr.calls.length, 0);
+  db.tables.marketplace_orders[0].claimed_at = new Date(Date.now() - STALE_LINE_MS - 1000).toISOString();
+  const r = await handleSales({ db, userId: U, marketplace: 'whatnot', sales: [wnSale()], deps: deps(tr, wn) });
+  assert.equal(r.newSales, 1); assert.equal(r.ended, 1);
+  assert.equal(db.tables.marketplace_listings.find((l) => l.id === 'L-eb').status, 'ended');
+});
+
+test('a stock push that failed is tried again on the next check', async () => {
+  const db = world({ quantity: 3 });
+  const wn = whatnotShop();
+  const r = await handleSales({ db, userId: U, marketplace: 'whatnot', sales: [wnSale({ quantity: 2 })], deps: deps(trading({ fail: 'Internal error to the application.' }), wn) });
+  assert.equal(r.updated, 0);
+  const eb = () => db.tables.marketplace_listings.find((l) => l.id === 'L-eb');
+  assert.equal(eb().quantity, 3); assert.match(eb().last_error, /Internal error/);
+  assert.equal(db.tables.snap_items[0].quantity, 1);
+  const good = trading();
+  const retry = await retryPendingEnds({ db, userId: U, deps: deps(good, wn) });
+  assert.equal(retry.updated, 1); assert.equal(retry.ended, 0);
+  assert.match(good.calls[0].body, /<ItemID>4071<\/ItemID><Quantity>1<\/Quantity>/);
+  assert.equal(eb().quantity, 1); assert.equal(eb().last_error, null); assert.equal(eb().status, 'active');
+  assert.deepEqual(db.tables.snap_items[0].sale_note.updated, [{ marketplace: 'ebay', ok: true }]);
+  assert.equal((await retryPendingEnds({ db, userId: U, deps: deps(good, wn) })).updated, 0);
+});
+
+test('an eBay sale of a cross-listed card is found even when the seller has more than 1,000 eBay listings', async () => {
+  const db = world();
+  // 1,500 other eBay listings ahead of this card's rows.
+  db.tables.marketplace_listings.unshift(...Array.from({ length: 1500 }, (_, i) => ({ id: `x${i}`, user_id: U, snap_item_id: `other-${i}`, marketplace: 'ebay', external_id: String(50000 + i), status: 'active' })));
+  const tr = trading(); const wn = whatnotShop();
+  const r = await handleSales({ db, userId: U, marketplace: 'ebay', sales: [ebaySale()], deps: deps(tr, wn) });
+  assert.equal(r.newSales, 1); assert.equal(r.ended, 1);
+  assert.equal(db.tables.marketplace_listings.find((l) => l.id === 'L-wn').status, 'ended');
 });

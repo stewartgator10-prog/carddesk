@@ -95,7 +95,7 @@ on its allowed hosts to read docs, call the API or connect the MCP server.
   On Whatnot filter, sale notes and reconnect banner in Snap to List.
 
 ## Deploy notes
-- Apply `supabase/migrations/20261129000000_marketplaces.sql`.
+- Apply `supabase/migrations/20261129000000_marketplaces.sql` **before** the code reaches either site (eBay publish now writes `marketplace_listings`; a missing table is only logged, but sell once needs it). It adds `marketplace_listings.status = 'creating'` (the claim a Whatnot create takes) and `marketplace_orders.claimed_at`.
 - `MARKETPLACE_TOKEN_KEY` on BOTH sites, the same value: `openssl rand -base64 32`. Without it, connect
   answers "Whatnot isn't set up on this site yet" and stores nothing.
 - `SALES_CHECK=off` on Tyche Cards (jaxspic runs the 5-minute check for everyone, like the nightly refresh).

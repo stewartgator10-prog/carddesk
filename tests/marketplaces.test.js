@@ -7,11 +7,12 @@ import { ADAPTERS, CONTRACT } from '../netlify/lib/marketplaces/registry.js';
 import { MarketplaceError, httpStatusFor } from '../netlify/lib/marketplaces/errors.js';
 import {
   listMarketplaces, connectMarketplace, disconnectMarketplace, createCrossListing, updateCrossListing, endCrossListing, setStock, checkSalesNow, saveMarketplaceSettings,
+  readyGames, STALE_CLAIM_MS,
 } from '../netlify/lib/marketplaces/service.js';
 import { resetThrottle } from '../netlify/lib/marketplaces/whatnot-client.js';
 import { open } from '../netlify/lib/secret-box.js';
 import { signCron, verifyCron } from '../netlify/lib/cron-signature.js';
-import { sellersToCheck } from '../netlify/lib/sales-run.js';
+import { sellersToCheck, crossListedCards } from '../netlify/lib/sales-run.js';
 import { requireFeature } from '../netlify/lib/billing.js';
 import { FEATURE_PLAN, hasFeature } from '../netlify/lib/plans.js';
 import { fakeDb } from './fake-db.js';
@@ -43,14 +44,16 @@ function shop() {
     return null;
   });
 }
-const world = (over = {}) => fakeDb({
+// The one-live-listing-per-card index from the migration (creating / active / ending).
+const ONE_LIVE = { marketplace_listings: [{ cols: ['snap_item_id', 'marketplace'], where: (r) => ['creating', 'active', 'ending'].includes(r.status) }] };
+const world = (over = {}, opts = {}) => fakeDb({
   snap_items: [{ id: CARD, user_id: U, title: 'Pikachu 025/165 151', game: 'pokemon', condition: 'NM', status: 'listed', price: 12.5, quantity: 1,
     ebay_item_id: '4071', ebay_url: 'https://www.ebay.com/itm/4071', photo_path: `${U}/b/1.jpg`, listed_at: '2026-11-01T00:00:00.000Z' }],
   inventory: [{ id: 'inv1', user_id: U, card_name: 'Pikachu', status: 'In Stock', ebay_item_id: '4071' }],
   ebay_accounts: [{ id: 'e1', user_id: U, ebay_username: 'jax' }],
   ebay_listings: [{ user_id: U, item_id: '4071', status: 'Active', quantity_available: 1 }],
   marketplace_listings: [], marketplace_accounts: [], marketplace_orders: [], subscriptions: [], ...over,
-}, null, { signedUrls: true });
+}, null, { signedUrls: true, unique: ONE_LIVE, ...opts });
 // eBay's order API with no new orders.
 const ebayOrders = async (url) => { assert.match(String(url), /^https:\/\/api\.ebay\.com\/sell\/fulfillment\//); return new Response(JSON.stringify({ orders: [], total: 0 }), { status: 200 }); };
 const trading = () => { const calls = []; return { calls, call: async (_t, name) => { calls.push(name); return `<${name}Response><Ack>Success</Ack></${name}Response>`; } }; };
@@ -220,4 +223,70 @@ test('the 5-minute job: signed per purpose, and it visits Whatnot sellers and cr
     ],
   });
   assert.deepEqual((await sellersToCheck(db)).map((s) => [s.userId, s.crossListed]), [['c', true], ['a', false], ['b', false]]);
+});
+
+test('a sold-out card can\'t be listed on Whatnot, whatever quantity the request sends', async () => {
+  const wn = shop();
+  const deps = { fetchImpl: wn.fetchImpl, sleep: async () => {} };
+  for (const over of [{ quantity: 0 }, { quantity: 1, sold_out_at: '2026-11-28T15:00:00.000Z' }]) {
+    const db = world();
+    await connectMarketplace(db, U, { marketplace: 'whatnot', token: TOKEN }, deps);
+    Object.assign(db.tables.snap_items[0], over);
+    wn.calls.length = 0;
+    await assert.rejects(createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13, quantity: 1 }, deps), (e) => e.status === 409 && /sold out/.test(e.message));
+    assert.equal(wn.calls.length, 0);
+    assert.equal(db.tables.marketplace_listings.filter((x) => x.marketplace === 'whatnot').length, 0);
+  }
+});
+
+test('two creates of the same card at once: the card is claimed first, so only one Whatnot product is made', async () => {
+  const db = world();
+  const wn = shop();
+  const deps = { fetchImpl: wn.fetchImpl, sleep: async () => {} };
+  await connectMarketplace(db, U, { marketplace: 'whatnot', token: TOKEN }, deps);
+  wn.calls.length = 0;
+  const [a, b] = await Promise.allSettled([
+    createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13 }, deps),
+    createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13 }, deps),
+  ]);
+  assert.deepEqual([a.status, b.status].sort(), ['fulfilled', 'rejected']);
+  const lost = [a, b].find((x) => x.status === 'rejected').reason;
+  assert.equal(lost.status, 409); assert.match(lost.message, /already being listed on Whatnot|already on Whatnot/);
+  assert.equal(wn.calls.filter((c) => c.method === 'POST' && c.path === '/products').length, 1);
+  const rows = db.tables.marketplace_listings.filter((x) => x.marketplace === 'whatnot');
+  assert.deepEqual(rows.map((r) => [r.status, r.external_id]), [['active', 'P-9001']]);
+});
+
+test('a claim left by a create that was cut off expires, and the next create goes ahead', async () => {
+  const db = world();
+  const wn = shop();
+  const deps = { fetchImpl: wn.fetchImpl, sleep: async () => {} };
+  await connectMarketplace(db, U, { marketplace: 'whatnot', token: TOKEN }, deps);
+  const fresh = new Date().toISOString();
+  db.tables.marketplace_listings.push({ id: 'claim', user_id: U, snap_item_id: CARD, marketplace: 'whatnot', status: 'creating', updated_at: fresh });
+  await assert.rejects(createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13 }, deps), (e) => e.status === 409 && /already being listed/.test(e.message));
+  db.tables.marketplace_listings.find((x) => x.id === 'claim').updated_at = new Date(Date.now() - STALE_CLAIM_MS - 1000).toISOString();
+  const l = await createCrossListing(db, U, { marketplace: 'whatnot', snapItemId: CARD, price: 13 }, deps);
+  assert.equal(l.status, 'active');
+  assert.deepEqual(db.tables.marketplace_listings.filter((x) => x.marketplace === 'whatnot').map((x) => x.status), ['active']);
+});
+
+test('Whatnot listing is offered only for games with a Whatnot category', async () => {
+  assert.deepEqual(readyGames('whatnot', { WHATNOT_CATEGORY_IDS: '{"pokemon":"1001"}' }), ['pokemon']);
+  assert.deepEqual(readyGames('whatnot', {}), []);
+  const db = world();
+  const wn = (await listMarketplaces(db, U)).find((m) => m.marketplace === 'whatnot');
+  assert.equal(wn.categoryReady, true); assert.deepEqual(wn.readyGames, ['pokemon']);
+});
+
+test('listing reads page past Supabase\'s 1,000-row cap: a cross-listed card past row 1,000 is still found', async () => {
+  const many = Array.from({ length: 2500 }, (_, i) => ({ id: `e${i}`, user_id: 'big', snap_item_id: `s${i}`, marketplace: 'ebay', external_id: String(9000 + i), status: 'active' }));
+  const db = fakeDb({
+    marketplace_accounts: [{ user_id: 'big', status: 'connected', sales_checked_at: '2026-11-28T10:00:00Z' }],
+    marketplace_listings: [...many, { id: 'w1', user_id: 'big', snap_item_id: 's2400', marketplace: 'whatnot', status: 'active' }],
+  });
+  assert.equal((await db.from('marketplace_listings').select('*')).data.length, 1000);   // the cap is real in the fake too
+  assert.deepEqual((await sellersToCheck(db)).map((s) => [s.userId, s.crossListed]), [['big', true]]);
+  assert.deepEqual(await crossListedCards(db, 'big'), [{ userId: 'big', snapItemId: 's2400' }]);
+  assert.equal((await listMarketplaces(fakeDb({ ...db.tables, ebay_accounts: [] }), 'big')).find((m) => m.marketplace === 'ebay').activeCount, 2500);
 });

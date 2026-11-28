@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { tradingCall } from './trading-price.js';
-import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths, LISTABLE_GAMES, GAME_LABELS } from './snap-logic.js';
+import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths, LISTABLE_GAMES, GAME_LABELS, isSoldOut } from './snap-logic.js';
 import { buildDescription } from './listing-copy.js';
 import { getAppToken } from './ebay-browse.js';
 import { offerThresholds } from './trading-price.js';
@@ -483,6 +483,8 @@ export async function checkSnapItem({ db, userId, token, item, settings, call = 
 
 export async function publishSnapItem({ db, userId, token, item, settings, call = tradingCall, promoteFetch = fetch }) {
   if (item.status !== 'approved') throw Object.assign(new Error('Only approved cards can be published.'), { status: 409 });
+  // A card that sold out on another marketplace stays approved; listing it again would sell it twice.
+  if (isSoldOut(item)) throw Object.assign(new Error('This card has sold out. Set its quantity above 0 before listing it again.'), { status: 409 });
   const check = item.publish_check;
   if (item.publish_state !== 'checked' || !check?.ok) throw Object.assign(new Error('Run the eBay check on this card first.'), { status: 409 });
   if (check.signature !== listingSignature(item)) throw Object.assign(new Error('The card changed after it was checked. Check it again before publishing.'), { status: 409 });
@@ -523,12 +525,16 @@ export async function publishSnapItem({ db, userId, token, item, settings, call 
     image_url: (item.ebay_picture_urls || [])[0] || null, status: 'Active', synced_at: now, best_offer: settings?.snapBestOffer !== false,
   }, { onConflict: 'account_id,item_id' }));
   // Where the card is listed, for cross-listing and "sell once" (netlify/lib/sell-once.js).
-  const inv = await must(db.from('inventory').select('id').eq('user_id', userId).eq('ebay_item_id', itemId));
-  await must(db.from('marketplace_listings').upsert({
-    user_id: userId, snap_item_id: item.id, inventory_id: inv?.[0]?.id || null, marketplace: 'ebay', external_id: itemId, url,
-    price: Number(item.price), currency: 'USD', quantity: listingQuantity(item), status: 'active', ended_reason: null, last_error: null,
-    listed_at: now, synced_at: now, updated_at: now,
-  }, { onConflict: 'user_id,marketplace,external_id' }));
+  // The card is already live on eBay, so a problem here is logged and never reported as a failed
+  // publish; ensureEbayRow (marketplaces/service.js) writes the row later when it's needed.
+  try {
+    const inv = await must(db.from('inventory').select('id').eq('user_id', userId).eq('ebay_item_id', itemId));
+    await must(db.from('marketplace_listings').upsert({
+      user_id: userId, snap_item_id: item.id, inventory_id: inv?.[0]?.id || null, marketplace: 'ebay', external_id: itemId, url,
+      price: Number(item.price), currency: 'USD', quantity: listingQuantity(item), status: 'active', ended_reason: null, last_error: null,
+      listed_at: now, synced_at: now, updated_at: now,
+    }, { onConflict: 'user_id,marketplace,external_id' }));
+  } catch (e) { console.warn(`marketplace_listings write for eBay item ${itemId} failed: ${e.message}`); }
   // Promoted Listings at the seller's rate. A problem here never undoes the listing; the card says why.
   const promo = await promoteListing({ db, userId, token, itemId, settings, fetchImpl: promoteFetch });
   if (!promo.skipped) await db.from('snap_items').update(promo.ok ? { promoted_at: new Date().toISOString(), promo_error: null } : { promo_error: promo.error }).eq('id', item.id).eq('user_id', userId);

@@ -35,6 +35,8 @@ const isEnglish = (lang) => /^english$/i.test(lang || 'English');
 // A listing's photos in eBay order: the main (identified) photo first, then the extras.
 // eBay's own limit. Listings brought in from eBay can already have this many.
 export const MAX_LISTING_PHOTOS = 24;
+// A card with no stock left (sold on any marketplace). Cards from before quantity existed have none set.
+export const isSoldOut = (item) => (item?.quantity != null && Number(item.quantity) < 1) || !!item?.sold_out_at;
 export function listingPhotoPaths(item) {
   const extras = Array.isArray(item?.extra_photo_paths) && item.extra_photo_paths.length
     ? item.extra_photo_paths

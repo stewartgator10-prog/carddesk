@@ -11,7 +11,7 @@ const list = (xs) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', 
 // The newest listing per marketplace for one card, live ones first.
 export function currentListings(listings = []) {
   const by = new Map();
-  const rank = (l) => (['active', 'ending'].includes(l.status) ? 2 : l.status === 'failed' ? 0 : 1);
+  const rank = (l) => (['creating', 'active', 'ending'].includes(l.status) ? 2 : l.status === 'failed' ? 0 : 1);
   for (const l of listings) {
     const cur = by.get(l.marketplace);
     const newer = String(l.updated_at || l.listed_at || l.created_at || '') > String(cur?.updated_at || cur?.listed_at || cur?.created_at || '');
@@ -26,6 +26,7 @@ export function chipsFor(listings = []) {
     const m = label(l.marketplace);
     const live = ['active', 'ending'].includes(l.status);
     if (live) return { id: l.id, marketplace: l.marketplace, live, tone: l.last_error ? 'warn' : 'live', text: `${m} · ${usd(l.price ?? 0)}${Number(l.quantity) > 1 ? ` · ${l.quantity} left` : ''}`, url: l.url || null };
+    if (l.status === 'creating') return { id: l.id, marketplace: l.marketplace, live, tone: 'warn', text: `Listing on ${m}…`, url: null };
     if (l.status === 'sold') return { id: l.id, marketplace: l.marketplace, live, tone: 'sold', text: `Sold on ${m}`, url: l.url || null };
     if (l.status === 'failed') return { id: l.id, marketplace: l.marketplace, live, tone: 'bad', text: `Not listed on ${m}`, url: null };
     if (l.ended_reason === 'disconnected') return { id: l.id, marketplace: l.marketplace, live, tone: 'ended', text: `Left up on ${m}, not watched`, url: l.url || null };

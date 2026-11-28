@@ -3,7 +3,8 @@ import { Camera, Loader, Check, X, RefreshCw, AlertTriangle, ExternalLink, Flask
 import { supabase, apiFetch } from './lib/supabase.js';
 import { resizeForUpload } from './lib/image.js';
 import CropImg from './lib/CropImg.jsx';
-import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS, liveChanges } from '../netlify/lib/snap-logic.js';
+import { buildTitle, buildDescription, summarizeTrial, REVIEW_LABELS, SNAP_DEFAULTS, MAX_LISTING_PHOTOS, listingPhotoPaths, GAME_LABELS, liveChanges, isSoldOut } from '../netlify/lib/snap-logic.js';
+import { allRows } from '../netlify/lib/db-pages.js';
 import { MODEL_LABELS, MODEL_PRICES, monthStart } from '../netlify/lib/ai-usage.js';
 import { splitCost } from '../netlify/lib/cost-split.js';
 import { askConfirm, askValue, askChoice } from './lib/dialog.jsx';
@@ -23,6 +24,14 @@ const ROUTE_REASONS = { not_a_card: 'not sure it was a card', low_confidence: 'u
 const LISTING_FIELDS = ['photo_path', 'title', 'price', 'quantity', 'condition', 'finish', 'card_name', 'catalog_set', 'catalog_number', 'misprint_confirmed', 'extra_photo_paths', 'game', 'rarity', 'extraction', 'description'];
 const FINISHES = [['normal', 'Normal'], ['holo', 'Holo'], ['reverse_holo', 'Reverse holo'], ['foil', 'Foil'], ['unknown', 'Unknown']];
 const CONDS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
+// The card's top-left word. A card that sold out, or whose eBay listing we took down, no longer says ON EBAY.
+function cardHeader(it, listings = []) {
+  if (DONE.includes(it.status) && isSoldOut(it)) return ['SOLD', 'var(--good)'];
+  const eb = currentListings(listings).find((l) => l.marketplace === 'ebay');
+  if (it.status === 'listed' && eb?.status === 'sold') return ['SOLD ON EBAY', 'var(--good)'];
+  if (it.status === 'listed' && eb?.status === 'ended' && ['seller', 'sold_elsewhere', 'sold_out'].includes(eb.ended_reason)) return ['ENDED ON EBAY', 'var(--ink-dim)'];
+  return STATUS[it.status] || [it.status, 'var(--ink-dim)'];
+}
 const STATUS = {
   uploaded: ['QUEUED', 'var(--ink-dim)'], identifying: ['READING…', 'var(--warn)'], ready: ['READY', 'var(--good)'],
   needs_review: ['CHECK', 'var(--warn)'], failed: ['FAILED', 'var(--bad)'], approved: ['APPROVED', 'var(--info)'], listed: ['ON EBAY', 'var(--good)'],
@@ -81,7 +90,8 @@ export default function SnapTab({ userId, settings, setSettings }) {
   const loadMarketplaces = useCallback(async () => {
     // Quietly empty when the tables aren't there yet or nothing is connected: the card looks as before.
     const [rows, acct] = await Promise.all([
-      supabase.from('marketplace_listings').select('*').order('created_at', { ascending: false }).limit(5000).then((r) => (r.error ? [] : r.data || []), () => []),
+      // Paged: Supabase returns at most 1,000 rows a request, and a volume seller has more eBay rows.
+      allRows(() => supabase.from('marketplace_listings').select('*').order('created_at', { ascending: false }).order('id')).catch(() => []),
       apiFetch('/api/marketplaces').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     setMp({ listings: rows, whatnot: acct?.marketplaces?.find((m) => m.marketplace === 'whatnot' && m.connected) || null });
@@ -94,6 +104,8 @@ export default function SnapTab({ userId, settings, setSettings }) {
   }, [mp.listings]);
   const liveOn = (it, market) => (listingsByCard.get(it.id) || []).find((l) => l.marketplace === market && ['active', 'ending'].includes(l.status));
   const whatnotOn = !!mp.whatnot;
+  // Games Whatnot can take a listing for yet (Whatnot needs a card category per game).
+  const whatnotReady = (it) => (mp.whatnot?.readyGames || []).includes(it.game);
   const putListing = (l) => setMp((x) => ({ ...x, listings: [l, ...x.listings.filter((y) => y.id !== l.id)] }));
 
 
@@ -288,13 +300,13 @@ export default function SnapTab({ userId, settings, setSettings }) {
   }
 
   async function checkApproved() {
-    const list = items.filter((i) => i.status === 'approved' && i.publish_state !== 'checked');
+    const list = items.filter((i) => i.status === 'approved' && i.publish_state !== 'checked' && !isSoldOut(i));
     const { ok, problems } = await ebayLoop('Checking with eBay', list, 'check');
     setMsg(problems.length ? { type: 'error', text: `${ok} passed, ${problems.length} need fixing: ${problems.slice(0, 3).join(' | ')}` } : { type: 'ok', text: `All ${ok} passed eBay's check. Nothing is listed yet.` });
   }
 
   async function publishChecked() {
-    const list = items.filter((i) => i.status === 'approved' && i.publish_state === 'checked' && i.publish_check?.ok);
+    const list = items.filter((i) => i.status === 'approved' && i.publish_state === 'checked' && i.publish_check?.ok && !isSoldOut(i));
     if (!list.length) return;
     const fees = list.reduce((t, i) => t + Number(i.publish_check?.fees?.total || 0), 0);
     const value = list.reduce((t, i) => t + Number(i.price || 0), 0);
@@ -417,18 +429,20 @@ export default function SnapTab({ userId, settings, setSettings }) {
     if (error) { setMsg({ type: 'error', text: error.message }); loadItems(); }
   }
 
-  const counts = useMemo(() => Object.fromEntries(OPEN.map((st) => [st, items.filter((i) => i.status === st).length])), [items]);
+  // A card that has sold out (on any marketplace) moves from Approved / On eBay to Sold.
+  const group = (i) => (DONE.includes(i.status) && isSoldOut(i) ? 'sold' : i.status);
+  const counts = useMemo(() => Object.fromEntries([...OPEN, 'sold'].map((st) => [st, items.filter((i) => group(i) === st).length])), [items]); // eslint-disable-line react-hooks/exhaustive-deps
   const [search, setSearch] = useState('');
   const [pageSize, setPageSize] = useState(24);
   useEffect(() => { setPageSize(24); }, [filter, search]);
   const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const matching = items.filter((i) => (filter === 'open' ? !DONE.includes(i.status) : filter === 'changed' ? liveChanges(i).length > 0 : filter === 'whatnot' ? !!liveOn(i, 'whatnot') : i.status === filter)
+  const matching = items.filter((i) => (filter === 'open' ? !DONE.includes(i.status) : filter === 'changed' ? liveChanges(i).length > 0 : filter === 'whatnot' ? !!liveOn(i, 'whatnot') : group(i) === filter)
     && words.every((w) => `${i.title || ''} ${i.card_name || ''} ${i.ebay_item_id || ''} ${i.sku || ''}`.toLowerCase().includes(w)));
   const visible = matching.slice(0, pageSize);
   const changedCount = useMemo(() => items.filter((i) => liveChanges(i).length > 0).length, [items]);
   const whatnotCount = items.filter((i) => liveOn(i, 'whatnot')).length;
   const toWhatnot = whatnotOn && ['approved', 'listed'].includes(filter)
-    ? matching.filter((i) => DONE.includes(i.status) && !liveOn(i, 'whatnot') && Number(i.quantity ?? 1) > 0 && Number(i.price) >= 1 && !i.photo_crop) : [];
+    ? matching.filter((i) => DONE.includes(i.status) && !liveOn(i, 'whatnot') && !(listingsByCard.get(i.id) || []).some((l) => l.marketplace === 'whatnot' && l.status === 'creating') && !isSoldOut(i) && whatnotReady(i) && Number(i.price) >= 1 && !i.photo_crop) : [];
   const wnReconnect = mp.whatnot?.status === 'reconnect' && mp.listings.some((l) => l.marketplace === 'whatnot' && l.status === 'active');
 
   // Signed links for the photos of the cards on screen (valid for an hour).
@@ -440,8 +454,9 @@ export default function SnapTab({ userId, settings, setSettings }) {
       if (data) setPhotoUrls((u) => ({ ...u, ...Object.fromEntries(data.filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl])) }));
     });
   }, [visibleKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const toCheck = items.filter((i) => i.status === 'approved' && i.publish_state !== 'checked').length;
-  const toPublish = items.filter((i) => i.status === 'approved' && i.publish_state === 'checked' && i.publish_check?.ok).length;
+  // A card that sold out on another marketplace is never checked or published to eBay again.
+  const toCheck = items.filter((i) => i.status === 'approved' && i.publish_state !== 'checked' && !isSoldOut(i)).length;
+  const toPublish = items.filter((i) => i.status === 'approved' && i.publish_state === 'checked' && i.publish_check?.ok && !isSoldOut(i)).length;
   const monthSpend = usage.month.reduce((t, r) => t + Number(r.cost_usd || 0), 0);
   const budget = Number(s.aiMonthlyBudget) || 0;
 
@@ -486,13 +501,13 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </div>
           )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`], ...(changedCount ? [['changed', `Not on eBay yet (${changedCount})`]] : []), ...(whatnotOn ? [['whatnot', `On Whatnot (${whatnotCount})`]] : [])].map(([k, l]) => (
+            {[['open', `To do (${items.filter((i) => !DONE.includes(i.status)).length})`], ['needs_review', `Check (${counts.needs_review})`], ['ready', `Ready (${counts.ready})`], ['failed', `Failed (${counts.failed})`], ['approved', `Approved (${counts.approved})`], ['listed', `On eBay (${counts.listed})`], ...(counts.sold ? [['sold', `Sold (${counts.sold})`]] : []), ...(changedCount ? [['changed', `Not on eBay yet (${changedCount})`]] : []), ...(whatnotOn ? [['whatnot', `On Whatnot (${whatnotCount})`]] : [])].map(([k, l]) => (
               <button key={k} className="btn-ghost" onClick={() => setFilter(k)} style={{ padding: '6px 10px', fontSize: '0.7rem', borderColor: filter === k ? 'var(--active)' : undefined, color: filter === k ? 'var(--active)' : undefined }}>{l}</button>
             ))}
             <span style={{ flex: 1 }} />
             <button className="btn-ghost" onClick={loadItems} title="Reload" style={{ padding: '6px 10px' }}><RefreshCw size={14} /></button>
             <button className="btn-ghost" disabled={!visible.length} onClick={batchPurchase} title="Split what you paid for these cards across them" style={{ padding: '6px 10px', fontSize: '0.7rem' }}>$ Purchase cost</button>
-            {filter !== 'approved' && filter !== 'listed' && <button className="btn-primary" disabled={!counts.ready} onClick={approveAllReady} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Check size={14} /> APPROVE ALL READY ({counts.ready})</button>}
+            {!['approved', 'listed', 'sold'].includes(filter) && <button className="btn-primary" disabled={!counts.ready} onClick={approveAllReady} style={{ padding: '8px 14px', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Check size={14} /> APPROVE ALL READY ({counts.ready})</button>}
             {toWhatnot.length > 0 && <button className="btn-ghost" disabled={!!ebayBusy} onClick={() => listAllOnWhatnot(toWhatnot)} style={{ padding: '8px 12px', fontSize: '0.75rem' }}>LIST {toWhatnot.length} ON WHATNOT</button>}
             {filter === 'approved' && <>
               <button className="btn-ghost" disabled={!toCheck || !!ebayBusy} onClick={checkApproved} title="Uploads photos and runs eBay's free listing check. Nothing goes live." style={{ padding: '8px 12px', fontSize: '0.75rem' }}>CHECK {toCheck} WITH EBAY</button>
@@ -510,7 +525,7 @@ export default function SnapTab({ userId, settings, setSettings }) {
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {visible.map((it) => <SnapCard key={it.id} it={it} listings={listingsByCard.get(it.id) || []} whatnotOn={whatnotOn} mp_={{ onList: () => listOnWhatnot(it), onChip: (l) => onChip(it, l), onEnd: (l) => endListing(it, l), onQuantity: (q) => changeQuantity(it, q) }} photo={photoUrls[it.photo_path]} photoUrls={photoUrls} photoBusy={photoBusy[it.id]} photo_={photoHandlers(it)} onSendPhotos={() => sendChangesToEbay(it)} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onReplace={(f) => replacePhoto(it, f)} />)}
+              {visible.map((it) => <SnapCard key={it.id} it={it} listings={listingsByCard.get(it.id) || []} whatnotOn={whatnotOn} mp_={{ busy: !!ebayBusy, ready: whatnotReady(it), onList: () => listOnWhatnot(it), onChip: (l) => onChip(it, l), onEnd: (l) => endListing(it, l), onQuantity: (q) => changeQuantity(it, q) }} photo={photoUrls[it.photo_path]} photoUrls={photoUrls} photoBusy={photoBusy[it.id]} photo_={photoHandlers(it)} onSendPhotos={() => sendChangesToEbay(it)} onSave={save} onApprove={approve} onDiscard={discard} onRetry={() => identify(it.id)} onAddPhotos={(fs) => addExtraPhotos(it, fs)} onReplace={(f) => replacePhoto(it, f)} />)}
             </div>
           )}
           {matching.length > visible.length && (
@@ -541,7 +556,7 @@ function SnapCard({ it, listings = [], whatnotOn = false, mp_ = {}, photo, photo
   const frontInput = useRef(null);
   const [d, setD] = useState(it);
   useEffect(() => { setD(it); }, [it]);
-  const [label, color] = STATUS[it.status] || [it.status, 'var(--ink-dim)'];
+  const [label, color] = cardHeader(it, listings);
   const busy = it.status === 'identifying' || it.status === 'uploaded';
   const field = (k, v) => setD((x) => ({ ...x, [k]: v }));
   const commit = (patch) => onSave(it.id, patch);
@@ -682,7 +697,7 @@ function MarketChips({ it, listings, whatnotOn, mp_ }) {
   const chips = chipsFor(listings);
   const tone = { live: ['var(--good)', 'var(--ink)'], warn: ['var(--warn)', 'var(--warn)'], sold: ['var(--good)', 'var(--good)'], ended: ['var(--line)', 'var(--ink-faint)'], bad: ['var(--bad)', 'var(--bad)'] };
   const wnNow = currentListings(listings).find((l) => l.marketplace === 'whatnot');
-  const canList = whatnotOn && !['active', 'ending'].includes(wnNow?.status) && Number(it.quantity ?? 1) > 0 && !it.photo_crop;
+  const canList = whatnotOn && mp_.ready !== false && !['creating', 'active', 'ending'].includes(wnNow?.status) && !isSoldOut(it) && !it.photo_crop;
   return (
     <div style={{ display: 'grid', gap: 4 }}>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -691,12 +706,12 @@ function MarketChips({ it, listings, whatnotOn, mp_ }) {
             disabled={!c.live && !c.url} aria-label={c.live && c.marketplace === 'whatnot' ? `${c.text}: change or end` : c.text}
             style={{ padding: '3px 8px', fontSize: '0.7rem', borderColor: tone[c.tone][0], color: tone[c.tone][1], whiteSpace: 'nowrap' }}>{c.text}</button>
         ))}
-        {canList && <button type="button" className="btn-primary" onClick={mp_.onList} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>List on Whatnot</button>}
+        {canList && <button type="button" className="btn-primary" disabled={mp_.busy} onClick={mp_.onList} style={{ padding: '4px 10px', fontSize: '0.7rem' }}>List on Whatnot</button>}
       </div>
       {wnNow?.status === 'failed' && wnNow.last_error && (
         <div className="accent-red" style={{ fontSize: '0.72rem', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ flex: 1, minWidth: 140 }}>{wnNow.last_error}</span>
-          {canList && <button type="button" className="btn-ghost" onClick={mp_.onList} style={{ padding: '3px 8px', fontSize: '0.7rem' }}>Try again</button>}
+          {canList && <button type="button" className="btn-ghost" disabled={mp_.busy} onClick={mp_.onList} style={{ padding: '3px 8px', fontSize: '0.7rem' }}>Try again</button>}
         </div>
       )}
     </div>

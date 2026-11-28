@@ -371,3 +371,35 @@ test('ending an eBay listing: EndFixedPriceItem, and "already ended" counts as d
   assert.deepEqual(gone, { ok: true, gone: true });
   await assert.rejects(endFixedPriceItem('t', '4071', async () => '<EndFixedPriceItemResponse><Ack>Failure</Ack><Errors><LongMessage>Internal error.</LongMessage><SeverityCode>Error</SeverityCode></Errors></EndFixedPriceItemResponse>'), /Internal error/);
 });
+
+const addOk = '<AddFixedPriceItemResponse><Ack>Success</Ack><ItemID>407999000222</ItemID><Fees><Fee><Name>ListingFee</Name><Fee>0.0</Fee></Fee></Fees></AddFixedPriceItemResponse>';
+
+test('a card that sold out on another marketplace is never published to eBay again, even with a passing check', async () => {
+  for (const over of [{ quantity: 0 }, { quantity: 1, sold_out_at: '2026-11-28T15:00:00.000Z' }]) {
+    const db = publishDb(card());
+    await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl: uploadOk, call: async () => verifyOk });
+    Object.assign(db.tables.snap_items[0], over);   // sold on Whatnot after the eBay check
+    await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: { snapPromotePct: 0 }, call: async () => { throw new Error('eBay was called'); } }),
+      (e) => e.status === 409 && /sold out/.test(e.message));
+    assert.equal(db.tables.snap_items[0].publish_state, 'checked');
+    assert.equal(db.tables.inventory.length, 0);
+  }
+});
+
+test('the listing is live on eBay: a failed marketplace_listings write is logged, not reported as a failed publish', async () => {
+  const db = fakeDb({
+    snap_items: [card()], inventory: [], ebay_listings: [], settings: [],
+    ebay_accounts: [{ id: 'acct', user_id: U, listing_templates: templates }],
+  }, null, { files: { 'u1/b/front.jpg': 'front', 'u1/b/back.jpg': 'back' },
+    failOn: ({ table, op }) => (table === 'marketplace_listings' && op !== 'select' ? 'relation "public.marketplace_listings" does not exist' : null) });
+  await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl: uploadOk, call: async () => verifyOk });
+  const warn = console.warn; const logged = [];
+  console.warn = (m) => logged.push(m);
+  try {
+    const r = await publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: { snapPromotePct: 0 }, call: async () => addOk });
+    assert.equal(r.itemId, '407999000222');
+  } finally { console.warn = warn; }
+  assert.equal(db.tables.snap_items[0].status, 'listed');
+  assert.equal(db.tables.inventory.length, 1);
+  assert.match(logged.join(' '), /marketplace_listings write for eBay item 407999000222 failed/);
+});

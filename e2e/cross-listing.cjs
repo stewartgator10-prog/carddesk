@@ -27,7 +27,8 @@ const db = {
     L('e4', '4', 'ebay', { status: 'sold' }), L('w4', '4', 'whatnot', { status: 'sold' }),
   ],
 };
-let whatnot = { marketplace: 'whatnot', connected: false, activeCount: 0 };
+// Whatnot card categories not confirmed yet on this site until the connect step switches them on.
+let whatnot = { marketplace: 'whatnot', connected: false, activeCount: 0, categoryReady: false, readyGames: [] };
 const log = [], errors = [], calls = [];
 const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 
@@ -57,7 +58,7 @@ async function setup(page, { billing = { enabled: false } } = {}) {
     if (body) calls.push(`marketplaces ${req.method()} ${body.action || ''}${body.token ? ' token-sent' : ''}${body.endListings != null ? ' end=' + body.endListings : ''}`);
     if (req.method() === 'POST' && body.action === 'connect') {
       if (body.token !== TOKEN) return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: "Whatnot didn't accept that token. Check you copied all of it.", code: 'rejected' }) });
-      whatnot = { marketplace: 'whatnot', connected: true, username: 'jaxcards', status: 'connected', salesCheckedAt: new Date(Date.now() - 3 * 60000).toISOString(), activeCount: 4, settings: { shippingProfileId: '501', shippingProfiles: [{ id: '501', name: 'Bubble mailer' }, { id: '502', name: 'Box' }] } };
+      whatnot = { marketplace: 'whatnot', connected: true, username: 'jaxcards', status: 'connected', salesCheckedAt: new Date(Date.now() - 3 * 60000).toISOString(), activeCount: 4, categoryReady: true, readyGames: ['pokemon'], settings: { shippingProfileId: '501', shippingProfiles: [{ id: '501', name: 'Bubble mailer' }, { id: '502', name: 'Box' }] } };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ marketplace: whatnot }) });
     }
     const all = [{ marketplace: 'ebay', connected: true, username: 'jaxcards', status: 'connected', activeCount: 3 }, whatnot];
@@ -84,6 +85,14 @@ async function setup(page, { billing = { enabled: false } } = {}) {
   await panel.getByText('Not connected').waitFor({ timeout: 15000 });
   log.push('nav label: ' + ((await page.getByText('Marketplaces', { exact: true }).count()) > 0));
   log.push('panel: ' + (await panel.innerText()).replace(/\s+/g, ' ').slice(0, 260));
+  const strip = page.getByRole('navigation', { name: 'Your marketplaces' });
+  await strip.getByText(/Whatnot · Not connected/).waitFor();
+  log.push('strip: ' + (await strip.innerText()).replace(/\s+/g, ' ') + ' | top y ' + Math.round((await strip.boundingBox()).y));
+  await page.screenshot({ path: OUT + '/xl-strip.png' });
+  await strip.getByRole('button', { name: 'Connect Whatnot' }).click();
+  await page.waitForTimeout(600);
+  log.push('jump lands on panel: ' + await panel.evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < window.innerHeight; }));
+  log.push('category note: ' + await panel.getByRole('status').filter({ hasText: /switched on/ }).innerText());
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: OUT + '/xl-panel-empty.png', fullPage: true });
   await panel.getByRole('textbox', { name: 'Whatnot token' }).fill('abc123');
@@ -101,6 +110,7 @@ async function setup(page, { billing = { enabled: false } } = {}) {
   await panel.getByRole('button', { name: 'Check for sales now' }).click();
   await panel.getByText(/new sale/).waitFor();
   log.push('check now: ' + await panel.getByRole('status').innerText());
+  log.push('strip connected: ' + (await strip.innerText()).replace(/\s+/g, ' '));
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: OUT + '/xl-panel-connected.png', fullPage: true });
   await panel.getByRole('button', { name: 'Disconnect Whatnot' }).click();
@@ -112,8 +122,12 @@ async function setup(page, { billing = { enabled: false } } = {}) {
 
   // ---- Snap to List: chips, notes, List on Whatnot ----
   await page.goto('http://localhost:4821/?tab=snap');
-  await page.getByRole('button', { name: /^On eBay \(4\)/ }).click();
+  // Sold-out cards have their own filter and are left out of On eBay (and of eBay publish).
+  await page.getByRole('button', { name: /^Sold \(3\)/ }).click();
   await page.getByText(/Ended on eBay automatically/).waitFor({ timeout: 15000 });
+  log.push('tab labels: ' + (await page.getByRole('button', { name: /^(On eBay|Sold|Approved) \(/ }).allInnerTexts()).join(' | '));
+  log.push('sold headers: ' + (await page.locator('.bg-card > div:first-child > span:first-child').allInnerTexts()).map((t) => t.trim()).filter(Boolean).join(' | '));
+  log.push('List on Whatnot on sold cards: ' + await page.getByRole('button', { name: 'List on Whatnot' }).count());
   for (const t of await page.getByRole('status').filter({ hasText: /Sold/ }).allInnerTexts()) log.push('note: ' + t.replace(/\s+/g, ' '));
   log.push('chips: ' + (await page.locator('button', { hasText: /^(eBay|Whatnot) · |^(Sold|Ended) on / }).allInnerTexts()).join(' | '));
   log.push('tabs: ' + (await page.getByRole('button', { name: /^On Whatnot/ }).innerText()));
@@ -125,6 +139,8 @@ async function setup(page, { billing = { enabled: false } } = {}) {
   await page.getByText('Ended on eBay.').waitFor();
   log.push('after End on eBay: ' + ((await page.getByText(/listing is still up/).count()) === 0 ? 'note is normal again' : 'still red'));
   // Whatnot chip menu
+  await page.getByRole('button', { name: /^On eBay \(1\)/ }).click();
+  log.push('on eBay headers: ' + (await page.locator('.bg-card > div:first-child > span:first-child').allInnerTexts()).map((t) => t.trim()).filter(Boolean).join(' | '));
   await page.getByRole('button', { name: /^Whatnot · \$13\.00 · 3 left: change or end/ }).click();
   log.push('chip menu: ' + (await page.getByRole('dialog', { name: 'Whatnot listing' }).innerText()).replace(/\s+/g, ' ').slice(0, 200));
   await page.screenshot({ path: OUT + '/xl-chip-menu.png' });
@@ -152,7 +168,7 @@ async function setup(page, { billing = { enabled: false } } = {}) {
 
   // ---- desktop ----
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('button', { name: /^On eBay \(4\)/ }).click();
+  await page.getByRole('button', { name: /^Sold \(3\)/ }).click();
   await page.waitForTimeout(400);
   await page.screenshot({ path: OUT + '/xl-snap-desktop.png', fullPage: true });
 

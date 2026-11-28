@@ -31,6 +31,29 @@ export async function checkSales() {
   return data;
 }
 
+// One line per marketplace at the top of the view, so Whatnot is in sight without scrolling past
+// the eBay listings. It shows what the panel below last loaded (sent as a window event).
+const PANEL_EVENT = 'tyche:marketplaces';
+export function MarketplaceStrip({ ebay = null }) {
+  const [wn, setWn] = useState(null);
+  useEffect(() => {
+    const on = (e) => setWn(e.detail || null);
+    window.addEventListener(PANEL_EVENT, on);
+    return () => window.removeEventListener(PANEL_EVENT, on);
+  }, []);
+  const jump = () => document.getElementById('whatnot-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const status = !wn ? 'Loading…' : !wn.connected ? 'Not connected' : wn.status === 'reconnect' ? 'Needs a new token' : `@${wn.username} · ${wn.activeCount} listed`;
+  return (
+    <nav aria-label="Your marketplaces" className="bg-card" style={{ padding: '10px 16px', marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: '0.8rem' }}>
+      <span className="ink-faint" style={{ fontSize: '0.7rem', letterSpacing: '0.12em' }}>MARKETPLACES</span>
+      <span style={{ whiteSpace: 'nowrap' }}><b>eBay</b> · {ebay || 'Not connected'}</span>
+      <span style={{ whiteSpace: 'nowrap', color: wn?.status === 'reconnect' ? 'var(--warn)' : undefined }}><b>Whatnot</b> · {status}</span>
+      <button type="button" className="btn-ghost" onClick={jump} style={{ padding: '4px 10px', fontSize: '0.75rem', marginLeft: 'auto' }}>
+        {wn && !wn.connected ? 'Connect Whatnot' : wn?.status === 'reconnect' ? 'Paste a new token' : 'Whatnot settings'}</button>
+    </nav>
+  );
+}
+
 export function salesSummary(r) {
   const parts = [r.newSales ? `${r.newSales} new sale${r.newSales === 1 ? '' : 's'}` : 'No new sales'];
   if (r.ended) parts.push(`${r.ended} listing${r.ended === 1 ? '' : 's'} taken down elsewhere`);
@@ -51,6 +74,7 @@ export default function MarketplacesPanel({ plan = null }) {
   useEffect(() => { load(); const t = setInterval(() => tick((n) => n + 1), 60_000); return () => clearInterval(t); }, [load]);
 
   const wn = list?.find((m) => m.marketplace === 'whatnot') || { connected: false, activeCount: 0 };
+  useEffect(() => { if (list != null) window.dispatchEvent(new CustomEvent(PANEL_EVENT, { detail: wn })); }, [list]); // eslint-disable-line react-hooks/exhaustive-deps
   const needsPro = !!plan && !hasFeature(plan.plan, 'cross_list');
 
   async function connect() {
@@ -110,7 +134,7 @@ export default function MarketplacesPanel({ plan = null }) {
   );
 
   return (
-    <section className="bg-card" aria-label="Whatnot" style={{ padding: 16, marginTop: 16, display: 'grid', gap: 10 }}>
+    <section id="whatnot-panel" className="bg-card" aria-label="Whatnot" style={{ padding: 16, marginTop: 16, display: 'grid', gap: 10, scrollMarginTop: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Store size={18} style={{ color: 'var(--accent)' }} />
         <h2 className="display-font" style={{ fontSize: '1.2rem', margin: 0 }}>WHATNOT</h2>
@@ -128,6 +152,11 @@ export default function MarketplacesPanel({ plan = null }) {
 
       {notice && <div className="accent-green" role="status" style={{ fontSize: '0.8rem' }}>{notice}{/token page/.test(notice) && <> <a href={TOKEN_PAGE} target="_blank" rel="noreferrer">Open it <ExternalLink size={10} /></a></>}</div>}
       {error && <div className="accent-red" role="alert" style={{ fontSize: '0.8rem' }}>{error}</div>}
+      {list != null && wn.categoryReady === false && !needsPro && (
+        <div className="accent-amber" role="status" style={{ fontSize: '0.8rem' }}>
+          Listing on Whatnot isn't switched on yet: we're confirming Whatnot's card categories. You can connect now; List on Whatnot shows up on your cards as soon as it's on.
+        </div>
+      )}
 
       {list != null && !wn.connected && needsPro && (
         <div style={{ fontSize: '0.85rem' }}>

@@ -40,7 +40,7 @@ create table if not exists public.marketplace_listings (
   price                numeric(12,2),
   currency             text not null default 'USD',
   quantity             integer,
-  status               text not null default 'active' check (status in ('active', 'ending', 'ended', 'sold', 'failed')),
+  status               text not null default 'active' check (status in ('creating', 'active', 'ending', 'ended', 'sold', 'failed')),
   ended_reason         text check (ended_reason in ('seller', 'sold_elsewhere', 'sold_out', 'not_found', 'disconnected')),
   last_error           text,
   listed_at            timestamptz,
@@ -53,9 +53,10 @@ create table if not exists public.marketplace_listings (
 );
 create unique index if not exists marketplace_listings_external_uq
   on public.marketplace_listings (user_id, marketplace, external_id);
--- One live listing per card per marketplace.
+-- One live listing per card per marketplace. 'creating' is the claim a create takes before it calls
+-- the marketplace, so two creates of the same card at once can't both make a product.
 create unique index if not exists marketplace_listings_one_live_uq
-  on public.marketplace_listings (snap_item_id, marketplace) where status in ('active', 'ending');
+  on public.marketplace_listings (snap_item_id, marketplace) where status in ('creating', 'active', 'ending');
 create index if not exists marketplace_listings_user_status_idx on public.marketplace_listings (user_id, status);
 alter table public.marketplace_listings enable row level security;
 drop policy if exists "owner can read own marketplace listings" on public.marketplace_listings;
@@ -75,7 +76,8 @@ create table if not exists public.marketplace_orders (
   item_price         numeric(12,2),
   status             text,
   ordered_at         timestamptz,
-  handled_at         timestamptz,
+  claimed_at         timestamptz,   -- a check is working on this line (expires, see sell-once.js)
+  handled_at         timestamptz,   -- every step for this line is done
   raw                jsonb,
   created_at         timestamptz not null default now(),
   primary key (user_id, marketplace, external_order_id, external_line_id)
