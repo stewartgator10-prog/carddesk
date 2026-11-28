@@ -10,6 +10,7 @@ import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, getSellerAccessToken, json } from '../lib/ebay-seller.js';
 import { loadSnapSettings } from '../lib/snap-identify.js';
 import { applyCrop, undoEdit, setPhotoOrder, autoCrop, pushChangesToEbay } from '../lib/snap-photos.js';
+import { requireFeature } from '../lib/billing.js';
 
 export default async (req) => {
   if (req.method !== 'POST') return json(405, { error: 'Use POST.' });
@@ -31,7 +32,8 @@ export default async (req) => {
       case 'crop': return json(200, { item: await applyCrop({ db, userId, item, path, corners: body.corners, by: 'manual' }) });
       case 'undo': return json(200, { item: await undoEdit({ db, userId, item, path }) });
       case 'order': return json(200, { item: await setPhotoOrder({ db, userId, item, paths: body.paths }) });
-      case 'update_ebay': return json(200, { item: await pushChangesToEbay({ db, userId, token: await getSellerAccessToken(db, userId), item }) });
+      case 'update_ebay': { const no = await requireFeature(db, userId, 'live_edit'); if (no) return no; }
+        return json(200, { item: await pushChangesToEbay({ db, userId, token: await getSellerAccessToken(db, userId), item }) });
       default: return json(400, { error: 'Unknown action.' });
     }
   } catch (err) {

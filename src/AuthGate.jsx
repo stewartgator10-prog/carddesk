@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase, supabaseConfigured } from './lib/supabase.js';
 import { Hedge, Clouds } from './Scenery.jsx';
+import { IS_TYCHE, Wordmark } from './brand.jsx';
 
 const card = { padding: 28, width: '100%', maxWidth: 380 };
 const input = { width: '100%', padding: '10px 12px', fontSize: '0.9rem', boxSizing: 'border-box' };
@@ -43,7 +44,8 @@ export default function AuthGate({ children }) {
 }
 
 function SignIn() {
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup' | 'reset'
+  // Tyche Cards homepage buttons arrive with ?signup=1 to open on "create account".
+  const [mode, setMode] = useState(() => (new URLSearchParams(window.location.search).get('signup') ? 'signup' : 'signin')); // 'signin' | 'signup' | 'reset'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -57,11 +59,11 @@ function SignIn() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else if (mode === 'signup') {
-        const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
+        const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: `${window.location.origin}${IS_TYCHE ? '/app' : ''}` } });
         if (error) throw error;
         if (!data.session) setMsg({ ok: true, text: 'Check your email to confirm your account, then sign in.' });
       } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}${IS_TYCHE ? '/app' : ''}` });
         if (error) throw error;
         setMsg({ ok: true, text: 'If that email has an account, a reset link is on its way.' });
       }
@@ -76,7 +78,7 @@ function SignIn() {
   return (
     <Scene>
       <form onSubmit={submit} className="bg-card" style={card}>
-        <h1 className="wordmark">Card<span>Desk</span></h1>
+        <Wordmark />
         <div className="quiet" style={{ fontSize: '0.85rem', margin: '6px 0 8px' }}>{title}</div>
         <label style={labelStyle} htmlFor="email">Email</label>
         <input id="email" className="bg-input" style={input} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -111,7 +113,7 @@ function NewPassword({ onDone }) {
   return (
     <Scene>
       <form onSubmit={submit} className="bg-card" style={card}>
-        <h1 className="wordmark">Card<span>Desk</span></h1>
+        <Wordmark />
         <div className="quiet" style={{ fontSize: '0.85rem', margin: '6px 0 8px' }}>set a new password</div>
         <label style={labelStyle} htmlFor="newpw">New password</label>
         <input id="newpw" className="bg-input" style={input} type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />

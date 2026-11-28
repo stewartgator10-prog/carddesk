@@ -11,6 +11,7 @@
 //     estimate_sales   { pct }                             estimate every past sale still without a cost
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, json } from '../lib/ebay-seller.js';
+import { requireFeature } from '../lib/billing.js';
 import {
   importListings, setCosts, estimateMissing, savePurchase, deletePurchase, setSaleCost, estimateSales,
 } from '../lib/costs.js';
@@ -38,6 +39,7 @@ export default async (req) => {
   const db = getSupabaseAdmin();
 
   try {
+    { const no = await requireFeature(db, userId, 'profit'); if (no) return no; }
     if (req.method === 'GET') return json(200, await summary(db, userId));
     if (req.method !== 'POST') return json(405, { error: 'Use GET or POST.' });
 

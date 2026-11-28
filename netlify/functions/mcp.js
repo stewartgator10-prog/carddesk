@@ -14,6 +14,7 @@ import { getSupabaseAdmin, getSellerAccessToken } from '../lib/ebay-seller.js';
 import { loadSnapSettings } from '../lib/snap-identify.js';
 import * as tools from '../lib/mcp-tools.js';
 import { userFromKey, looksLikeKey } from '../lib/access-keys.js';
+import { requireFeature } from '../lib/billing.js';
 
 const metadataUrl = (origin) => `${origin}/.well-known/oauth-protected-resource`;
 const unauthorized = (origin, message = 'Sign in to CardDesk to use this connector.') => new Response(JSON.stringify({ error: message }), {
@@ -221,6 +222,7 @@ export async function handleMcp(req, { authenticate = defaultAuthenticate, db = 
   const auth = await authenticate(req, origin, admin);
   if (auth.response) return auth.response;
   const userId = auth.user.id;
+  { const no = await requireFeature(admin, userId, 'connector'); if (no) return no; }   // Elite on Tyche Cards
   const ctx = {
     db: admin, userId, origin, deps,
     settings: await loadSnapSettings(admin, userId),

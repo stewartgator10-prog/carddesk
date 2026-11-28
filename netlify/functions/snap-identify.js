@@ -5,6 +5,7 @@
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, json } from '../lib/ebay-seller.js';
 import { identifySnapItem } from '../lib/snap-identify.js';
+import { requireFeature, requireCards } from '../lib/billing.js';
 
 export default async (req) => {
   if (req.method !== 'POST') return json(405, { error: 'Use POST.' });
@@ -18,6 +19,7 @@ export default async (req) => {
   if (error) return json(500, { error: error.message });
   if (!item) return json(404, { error: 'Card not found' });
   if (['approved', 'listed', 'discarded'].includes(item.status)) return json(409, { error: `This card is already ${item.status}.` });
+  if (!item.identified_at) { const no = await requireCards(db, auth.user.id, 1); if (no) return no; }
 
   try {
     return json(200, await identifySnapItem({ db, userId: auth.user.id, item }));

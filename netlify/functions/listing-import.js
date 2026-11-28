@@ -6,6 +6,7 @@
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, getSellerAccessToken, json } from '../lib/ebay-seller.js';
 import { pendingImports, importListings, refreshFullSizeMany } from '../lib/listing-import.js';
+import { requireFeature, requireCards } from '../lib/billing.js';
 
 export default async (req) => {
   const auth = await requireUser(req);
@@ -13,6 +14,7 @@ export default async (req) => {
   const userId = auth.user.id;
   const db = getSupabaseAdmin();
   try {
+    { const no = await requireFeature(db, userId, 'import'); if (no) return no; }
     if (req.method === 'GET') return json(200, await pendingImports({ db, userId }));
     if (req.method !== 'POST') return json(405, { error: 'Use GET or POST.' });
     const body = (await req.json().catch(() => null)) || {};

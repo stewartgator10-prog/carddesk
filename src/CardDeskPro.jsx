@@ -33,6 +33,11 @@ import { OFFER_DEFAULTS } from '../netlify/lib/offer-logic.js';
 import { conditionFromEbay, extractAskPrice } from './pricing/pricingLogic.js';
 import { DialogHost } from './lib/dialog.jsx';
 import UpdateBanner from './UpdateBanner.jsx';
+import { IS_TYCHE, BRAND, Wordmark, TycheMark } from './brand.jsx';
+import { usePlan, PlanBadge, PlanPanel, Locked, locked, startCheckout } from './PlanPanel.jsx';
+
+// Views that need a paid plan on Tyche Cards (the founder site has no plans).
+const VIEW_FEATURE = { offers: 'buy_offers', collection: 'collection', repricer: 'repricer', costs: 'profit', ebaysales: 'profit' };
 
 const DEFAULT_SETTINGS = {
   ebayFeePct: 13.25,
@@ -97,6 +102,23 @@ export default function CardDeskPro({ session }) {
   const [lastView, setLastView] = useState({});
   useEffect(() => { setLastView((m) => ({ ...m, [sectionOf(tab).id]: tab })); }, [tab]);
   const section = sectionOf(tab);
+  // ---------- Tyche Cards plan ----------
+  const plan = usePlan(IS_TYCHE);
+  const [planOpen, setPlanOpen] = useState(null);   // null | { reason }
+  const [billingMsg, setBillingMsg] = useState(null);
+  useEffect(() => {
+    if (!IS_TYCHE) return undefined;
+    const onUpgrade = (e) => { setPlanOpen({ reason: e.detail?.error || null }); window.dispatchEvent(new Event('tyche:plan-changed')); };
+    window.addEventListener('tyche:upgrade', onUpgrade);
+    // Back from Stripe, or arriving from a homepage plan button.
+    const q = new URLSearchParams(window.location.search);
+    const clean = () => window.history.replaceState(null, '', window.location.pathname);
+    if (q.get('billing') === 'success') { setBillingMsg({ ok: true, text: 'Thanks! Your plan is active. It can take a few seconds to show here.' }); clean(); setTimeout(() => window.dispatchEvent(new Event('tyche:plan-changed')), 3000); }
+    else if (q.get('billing') === 'cancelled') { setBillingMsg({ ok: false, text: 'Checkout was cancelled. You\'re still on your current plan.' }); clean(); }
+    else if (q.get('plan') && q.get('interval')) { clean(); startCheckout(q.get('plan'), q.get('interval')).catch((err) => setBillingMsg({ ok: false, text: err.message })); }
+    return () => window.removeEventListener('tyche:upgrade', onUpgrade);
+  }, []);
+  const lockedFeature = locked(plan, VIEW_FEATURE[tab]) ? VIEW_FEATURE[tab] : null;
   const [dataError, setDataError] = useState(null);
   const { settings, setSettings, loaded: settingsLoaded } = useSettings(userId, DEFAULT_SETTINGS, setDataError);
   const { items: watchlist, setItems: setWatchlist, loaded: watchLoaded, reload: reloadWatchlist } = useCollection('watchlist', userId, setDataError);
@@ -415,8 +437,9 @@ export default function CardDeskPro({ session }) {
         <header className="app-pad" style={{ padding: '22px 32px 14px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div className="sky-text">
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-              <h1 className="wordmark">Card<span>Desk</span></h1>
-              <span className="quiet" style={{ fontSize: '0.8rem' }}>buy, list and sell, at an easy pace</span>
+              {IS_TYCHE && <span style={{ alignSelf: 'center' }}><TycheMark size={34} gold="var(--leaf-deep)" /></span>}
+              <Wordmark />
+              <span className="quiet" style={{ fontSize: '0.8rem' }}>{BRAND.tagline}</span>
             </div>
             <div className="ink-dim" style={{ fontSize: '0.78rem', fontWeight: 600, marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <span><span className="pulse-dot"></span> {watchlist.length} watched</span>
@@ -425,6 +448,7 @@ export default function CardDeskPro({ session }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <PlanBadge plan={plan} onOpen={() => setPlanOpen({ reason: null })} />
             <button className="btn-ghost" onClick={exportData} style={{ padding: '8px 12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Download size={14} /> Backup</button>
             <label className="btn-ghost" style={{ padding: '8px 12px', fontSize: '0.8rem', fontWeight: 400, letterSpacing: 0, margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--ink)' }}>
               <Upload size={14} /> Import backup<input type="file" accept=".json" onChange={importData} style={{ display: 'none' }} />
@@ -436,6 +460,12 @@ export default function CardDeskPro({ session }) {
         <Hedge number={SECTIONS.indexOf(section) + 1} />
       </div>
 
+      {billingMsg && (
+        <div className="app-pad" role="status" style={{ padding: '10px 32px', background: billingMsg.ok ? 'var(--good-wash)' : 'var(--warn-wash)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: '0.85rem' }}>
+          <span>{billingMsg.text}</span><button className="btn-icon" aria-label="Dismiss" onClick={() => setBillingMsg(null)}><X size={14} /></button>
+        </div>
+      )}
+      {planOpen && <PlanPanel plan={plan} reason={planOpen.reason} onClose={() => setPlanOpen(null)} />}
       {collectionAlerts > 0 && tab !== 'collection' && (
         <div className="app-pad" role="status" style={{ padding: '10px 32px', background: 'var(--warn-wash)', borderBottom: '1px solid var(--line)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.85rem' }}>
           <Bell size={15} className="accent-amber" />
@@ -462,6 +492,7 @@ export default function CardDeskPro({ session }) {
           <button key={s.id} className={`tab-btn ${section.id === s.id ? 'active' : ''}`} aria-current={section.id === s.id ? 'page' : undefined}
             onClick={() => setTab(lastView[s.id] || s.views[0].id)}>
             <span className="hex"><s.Icon size={13} strokeWidth={2.4} /></span>{s.label}
+            {s.views.every((v) => locked(plan, VIEW_FEATURE[v.id])) && <span className="ink-faint" aria-label="needs an upgrade" style={{ fontSize: '0.7rem' }}> · {plan && ({ buy_offers: 'Elite', collection: 'Pro', profit: 'Pro' }[VIEW_FEATURE[s.views[0].id]])}</span>}
             {s.id === 'collection' && collectionAlerts > 0 && <span className="tab-badge" aria-label={`${collectionAlerts} ready to review`}>{collectionAlerts}</span>}
           </button>
         ))}
@@ -478,6 +509,7 @@ export default function CardDeskPro({ session }) {
 
       <main className="app-pad" style={{ padding: '32px', maxWidth: 1400, margin: '0 auto' }}>
 
+        {lockedFeature && <Locked feature={lockedFeature} onUpgrade={() => setPlanOpen({ reason: null })} />}
         {/* ============ DEAL ANALYZER ============ */}
         {tab === 'analyzer' && (
           <div className="responsive-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
@@ -754,7 +786,7 @@ export default function CardDeskPro({ session }) {
         {tab === 'listings' && <ListingsTab />}
 
         {/* ============ REPRICER ============ */}
-        {tab === 'repricer' && (
+        {tab === 'repricer' && !lockedFeature && (
           <RepricerTab comps={comps} inventory={inventory} settings={settings} onGoToComps={() => setTab('comps')} onGoToListings={() => setTab('listings')} />
         )}
 
@@ -802,18 +834,18 @@ export default function CardDeskPro({ session }) {
             </div>
           </div>
         )}
-        {tab === 'ebaysales' && <EbaySalesTab />}
-        {tab === 'collection' && (
+        {tab === 'ebaysales' && !lockedFeature && <EbaySalesTab />}
+        {tab === 'collection' && !lockedFeature && (
           <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
             <CollectionTab userId={userId} settings={settings} setSettings={setSettings} onGoToSnap={() => setTab('snap')} onAlertsChanged={loadCollectionAlerts} />
           </Suspense>
         )}
-        {tab === 'offers' && (
+        {tab === 'offers' && !lockedFeature && (
           <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
             <BuyOffersTab userId={userId} settings={settings} setSettings={setSettings} onGoToSnap={() => setTab('snap')} />
           </Suspense>
         )}
-        {tab === 'costs' && (
+        {tab === 'costs' && !lockedFeature && (
           <Suspense fallback={<div className="ink-faint" style={{ padding: 48, textAlign: 'center' }}><Loader size={18} className="spin" /></div>}>
             <CostsTab settings={settings} />
           </Suspense>
@@ -824,7 +856,7 @@ export default function CardDeskPro({ session }) {
           </Suspense>
         )}
       </main>
-      <footer className="page-foot quiet">CardDesk, noon.</footer>
+      <footer className="page-foot quiet">{IS_TYCHE ? 'Tyche Cards · fortune favors the listed' : 'CardDesk, noon.'}</footer>
       <DialogHost />
       <UpdateBanner />
 

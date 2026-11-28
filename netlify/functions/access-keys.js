@@ -6,6 +6,7 @@
 import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, json } from '../lib/ebay-seller.js';
 import { createKey, listKeys, revokeKey } from '../lib/access-keys.js';
+import { requireFeature, requireCards } from '../lib/billing.js';
 
 export default async (req) => {
   const auth = await requireUser(req);
@@ -15,6 +16,8 @@ export default async (req) => {
   try {
     if (req.method === 'GET') return json(200, { keys: await listKeys({ db, userId }) });
     if (req.method === 'POST') {
+      { const no = await requireFeature(db, userId, 'connector'); if (no) return no; }
+
       const body = (await req.json().catch(() => null)) || {};
       return json(200, { key: await createKey({ db, user: auth.user, name: body.name }) });
     }

@@ -9,6 +9,8 @@ import { requireUser } from '../lib/auth.js';
 import { getSupabaseAdmin, getSellerAccessToken, json } from '../lib/ebay-seller.js';
 import { learnTemplates, checkSnapItem, publishSnapItem } from '../lib/ebay-listing.js';
 import { loadSnapSettings } from '../lib/snap-identify.js';
+import { planFor } from '../lib/billing.js';
+import { hasFeature } from '../lib/plans.js';
 
 export default async (req) => {
   const auth = await requireUser(req);
@@ -32,7 +34,9 @@ export default async (req) => {
     const { data: item, error } = await db.from('snap_items').select('*').eq('id', String(body.id)).eq('user_id', userId).maybeSingle();
     if (error) throw new Error(error.message);
     if (!item) return json(404, { error: 'Card not found.' });
-    const settings = await loadSnapSettings(db, userId);
+    let settings = await loadSnapSettings(db, userId);
+    // Best Offer and promotion on new listings are part of Pro and up (Tyche Cards only).
+    if (!hasFeature(await planFor(db, userId), 'automation')) settings = { ...settings, snapBestOffer: false, snapPromotePct: 0 };
 
     if (body.action === 'check') return json(200, { item: await checkSnapItem({ db, userId, token, item, settings }) });
     return json(200, { result: await publishSnapItem({ db, userId, token, item, settings }) });
