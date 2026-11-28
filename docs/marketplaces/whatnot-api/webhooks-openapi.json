@@ -1,0 +1,3953 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Webhooks",
+    "version": "2.0.0",
+    "description": "Every topic Whatnot can deliver to your webhook endpoint. Each topic's page shows the headers and payload of its deliveries.\n\nTo subscribe to topics and verify deliveries, see the [Webhooks guide](/getting-started/webhooks)."
+  },
+  "tags": [
+    {
+      "name": "Orders"
+    },
+    {
+      "name": "Shows"
+    },
+    {
+      "name": "Merchandising"
+    },
+    {
+      "name": "Shipments"
+    },
+    {
+      "name": "Products"
+    }
+  ],
+  "webhooks": {
+    "orders.created": {
+      "post": {
+        "summary": "orders.created",
+        "description": "An order was placed, or for an offer, the seller accepted it. Requires read:orders.",
+        "operationId": "orders_created_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderCreatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "orders.updated": {
+      "post": {
+        "summary": "orders.updated",
+        "description": "An order's status changed after it was placed, for example when it was cancelled or completed. Requires read:orders.",
+        "operationId": "orders_updated_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderUpdatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "shows.created": {
+      "post": {
+        "summary": "shows.created",
+        "description": "A seller scheduled a show. Rehearsals aren't sent. Requires read:shows.",
+        "operationId": "shows_created_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShowCreatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shows"
+        ]
+      }
+    },
+    "shows.updated": {
+      "post": {
+        "summary": "shows.updated",
+        "description": "A show changed, such as its title, start time or visibility. Status changes are reported in their respective hooks. Requires read:shows.",
+        "operationId": "shows_updated_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShowUpdatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shows"
+        ]
+      }
+    },
+    "shows.started": {
+      "post": {
+        "summary": "shows.started",
+        "description": "A show went live, including when a stopped show resumed. Requires read:shows.",
+        "operationId": "shows_started_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShowStartedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shows"
+        ]
+      }
+    },
+    "shows.ended": {
+      "post": {
+        "summary": "shows.ended",
+        "description": "A show ended, including when Whatnot ended an abandoned show. It drops out of `GET /merchandising/products/{product_id}/shows` for its products, but no `merchandising.products.removed_from_show` is sent for them. Requires read:shows.",
+        "operationId": "shows_ended_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShowEndedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shows"
+        ]
+      }
+    },
+    "shows.cancelled": {
+      "post": {
+        "summary": "shows.cancelled",
+        "description": "A show was cancelled. It drops out of `GET /merchandising/products/{product_id}/shows` for its products, but no `merchandising.products.removed_from_show` is sent for them. Requires read:shows.",
+        "operationId": "shows_cancelled_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShowCancelledWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shows"
+        ]
+      }
+    },
+    "merchandising.products.added_to_show": {
+      "post": {
+        "summary": "merchandising.products.added_to_show",
+        "description": "A product was added to a show. Requires read:merchandising.",
+        "operationId": "merchandising_products_added_to_show_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductAddedToShowWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Merchandising"
+        ]
+      }
+    },
+    "merchandising.products.removed_from_show": {
+      "post": {
+        "summary": "merchandising.products.removed_from_show",
+        "description": "A product was removed from a show, including when its listing was deleted. It isn't sent when a show is cancelled or ends; `shows.cancelled` and `shows.ended` cover those. Requires read:merchandising.",
+        "operationId": "merchandising_products_removed_from_show_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductRemovedFromShowWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Merchandising"
+        ]
+      }
+    },
+    "shipments.created": {
+      "post": {
+        "summary": "shipments.created",
+        "description": "A shipment was created for an order. Requires read:shipments.",
+        "operationId": "shipments_created_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentCreatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "shipments.label_generated": {
+      "post": {
+        "summary": "shipments.label_generated",
+        "description": "A shipping label was generated or regenerated for a shipment. Requires read:shipments.",
+        "operationId": "shipments_label_generated_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentLabelGeneratedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "shipments.tracking_code_added": {
+      "post": {
+        "summary": "shipments.tracking_code_added",
+        "description": "A shipment got a tracking code, from a purchased label, the seller's own label or a replacement. Requires read:shipments.",
+        "operationId": "shipments_tracking_code_added_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentTrackingCodeAddedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "shipments.parcel_updated": {
+      "post": {
+        "summary": "shipments.parcel_updated",
+        "description": "The seller edited a shipment's parcel weight or dimensions. Adding or removing items also changes the parcel; shipments.items.added and shipments.items.removed carry the new parcel, and this webhook isn't sent for those changes. Requires read:shipments.",
+        "operationId": "shipments_parcel_updated_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentParcelUpdatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "shipments.items.added": {
+      "post": {
+        "summary": "shipments.items.added",
+        "description": "Items joined a shipment, when orders were bundled at checkout or the seller bundled shipments. shipment_item_ids lists every item on the shipment after the change, not only the added ones. The body also carries the shipment's parcel, which changes with its items. Requires read:shipments.",
+        "operationId": "shipments_items_added_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentItemsAddedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "shipments.items.removed": {
+      "post": {
+        "summary": "shipments.items.removed",
+        "description": "Items left a shipment, when it was split or unbundled. shipment_item_ids lists the items still on the shipment after the change, not the removed ones. The body also carries the shipment's parcel, which changes with its items. A shipment the seller bundled into another one loses all its items and is reported by shipments.replaced instead. Requires read:shipments.",
+        "operationId": "shipments_items_removed_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentItemsRemovedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "shipments.cancelled": {
+      "post": {
+        "summary": "shipments.cancelled",
+        "description": "A shipment was cancelled by Whatnot support. Requires read:shipments.",
+        "operationId": "shipments_cancelled_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentCancelledWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "shipments.replaced": {
+      "post": {
+        "summary": "shipments.replaced",
+        "description": "All of a shipment's items moved to another shipment, for example when a new label was bought for it, the seller added tracking from their own label, Whatnot support changed its label, or the seller bundled it into another shipment. The previous shipment is usually cancelled. The body has both shipments. Requires read:shipments.",
+        "operationId": "shipments_replaced_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentReplacedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Shipments"
+        ]
+      }
+    },
+    "products.created": {
+      "post": {
+        "summary": "products.created",
+        "description": "A product was created. Requires read:inventory.",
+        "operationId": "products_created_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductCreatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "products.updated": {
+      "post": {
+        "summary": "products.updated",
+        "description": "A product changed, including its variants, inventory or prices. The payload doesn't say which fields changed. Requires read:inventory.",
+        "operationId": "products_updated_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductUpdatedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Products"
+        ]
+      }
+    },
+    "products.deleted": {
+      "post": {
+        "summary": "products.deleted",
+        "description": "A product was deleted. Requires read:inventory.",
+        "operationId": "products_deleted_webhook",
+        "parameters": [
+          {
+            "description": "Unique ID of the event. Retries of a delivery send the same ID, so use it to deduplicate.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "example": "0b7e4f6c-3d1a-4a8e-9f2b-5c6d7e8f9a0b",
+            "name": "webhook-id",
+            "in": "header"
+          },
+          {
+            "description": "When this delivery attempt was sent, as a Unix timestamp in seconds. Each retry sends a new timestamp.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 1792512005,
+            "name": "webhook-timestamp",
+            "in": "header"
+          },
+          {
+            "description": "Space-separated signatures, each `v1,` followed by the base64 HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{body}`, keyed with your webhook secret.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "v1,8m/VX9GLLqhNZJndMpPw7OTUKSDI4szDXAmIFY8ffBI=",
+            "name": "webhook-signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductDeletedWebhookBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge delivery. Any 2XX status counts."
+          },
+          "default": {
+            "description": "Fail delivery. Non-2XX statuses and timeouts are retried."
+          }
+        },
+        "security": [],
+        "tags": [
+          "Products"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Category": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "title": "Id",
+            "description": "The category's id."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The category's display name.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "Category"
+      },
+      "DimensionProfile": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,18}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "An existing dimension profile id to reference."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The dimension profile's name. When auto-creating a profile this is used as a name prefix, with the weight and dimensions appended."
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Weight"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The profile's per-item weight."
+          },
+          "dimensions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Dimensions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The profile's package dimensions."
+          },
+          "ownership": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DimensionProfileOwnership"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the dimension profile belongs to the seller or Whatnot.",
+            "readOnly": true
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active",
+            "description": "Whether the dimension profile is active.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "title": "DimensionProfile",
+        "description": "A dimension profile, also embedded in products and shipment items.\n\nOn read, the resolved profile. On create, reference an existing profile by\n`id`, or supply `weight` and `dimensions` (with an optional `name`) to\nauto-create one."
+      },
+      "DimensionProfileOwnership": {
+        "type": "string",
+        "enum": [
+          "seller",
+          "whatnot"
+        ],
+        "title": "DimensionProfileOwnership"
+      },
+      "DimensionUnit": {
+        "type": "string",
+        "enum": [
+          "inch",
+          "feet",
+          "centimeter",
+          "meter"
+        ],
+        "title": "DimensionUnit"
+      },
+      "Dimensions": {
+        "properties": {
+          "length": {
+            "type": "number",
+            "title": "Length",
+            "description": "The package length."
+          },
+          "width": {
+            "type": "number",
+            "title": "Width",
+            "description": "The package width."
+          },
+          "height": {
+            "type": "number",
+            "title": "Height",
+            "description": "The package height."
+          },
+          "unit": {
+            "$ref": "#/components/schemas/DimensionUnit",
+            "description": "The dimension unit."
+          }
+        },
+        "type": "object",
+        "required": [
+          "length",
+          "width",
+          "height",
+          "unit"
+        ],
+        "title": "Dimensions"
+      },
+      "FixedPriceDiscount": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "fixed_price",
+            "title": "Type",
+            "description": "A fixed amount off the order."
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The amount discounted."
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "amount"
+        ],
+        "title": "FixedPriceDiscount"
+      },
+      "FulfillmentMethod": {
+        "type": "string",
+        "enum": [
+          "shipping",
+          "pickup"
+        ],
+        "title": "FulfillmentMethod"
+      },
+      "HazardousMaterial": {
+        "type": "string",
+        "enum": [
+          "not_hazardous",
+          "standard",
+          "lithium_battery"
+        ],
+        "title": "HazardousMaterial"
+      },
+      "Media": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "The image's id.",
+            "readOnly": true
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "On create, the image URL to ingest. On read, the CDN URL of the ingested image."
+          },
+          "alt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alt",
+            "description": "The image's alt text / label, if set."
+          }
+        },
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "Media"
+      },
+      "Money": {
+        "properties": {
+          "amount": {
+            "type": "string",
+            "title": "Amount",
+            "description": "Decimal amount in major currency units, e.g. 42.00."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "description": "ISO 4217 currency code."
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "Money"
+      },
+      "Order": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The order's ID."
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "The url of the order in the seller's dashboard."
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus",
+            "description": "The order's status. `pending` orders aren't ready to fulfill; fulfill `pending_fulfillment` orders."
+          },
+          "show_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Show Id",
+            "description": "The show the order was placed in; null for orders placed anywhere else."
+          },
+          "transaction_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderTransactionType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the order was sold, if recorded. `other` covers retired formats."
+          },
+          "buyer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Whatnot user who placed the order; requires read:customers."
+          },
+          "amounts": {
+            "$ref": "#/components/schemas/OrderAmounts",
+            "description": "The order's monetary amounts."
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "Creation timestamp, if recorded."
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At",
+            "description": "Last update timestamp, if recorded."
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At",
+            "description": "When the order was cancelled, if it was."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "status",
+          "show_id",
+          "transaction_type",
+          "buyer",
+          "amounts",
+          "created_at",
+          "updated_at",
+          "cancelled_at"
+        ],
+        "title": "Order",
+        "example": {
+          "amounts": {
+            "applied_discount": {
+              "amount": {
+                "amount": "2",
+                "currency": "USD"
+              },
+              "type": "fixed_price"
+            },
+            "shipping": {
+              "amount": "5.99",
+              "currency": "USD"
+            },
+            "subtotal": {
+              "amount": "42",
+              "currency": "USD"
+            },
+            "tax": {
+              "amount": "3.78",
+              "currency": "USD"
+            },
+            "total": {
+              "amount": "49.77",
+              "currency": "USD"
+            }
+          },
+          "buyer": {
+            "display_name": "Card Collector",
+            "id": "6789",
+            "username": "cardcollector"
+          },
+          "created_at": "2026-09-21T12:00:00.000Z",
+          "id": "123456",
+          "show_id": "0b6f3c1e-8a52-4d2e-9f7a-3c5d1e2f4a6b",
+          "status": "pending_fulfillment",
+          "transaction_type": "auction",
+          "updated_at": "2026-09-21T13:00:00.000Z",
+          "url": "https://www.whatnot.com/dashboard/orders/5f0c2b7e-1d3a-4c6b-9e8f-7a6b5c4d3e2f"
+        }
+      },
+      "OrderAmounts": {
+        "properties": {
+          "subtotal": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The price of the items ordered."
+          },
+          "shipping": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Shipping charged to the buyer."
+          },
+          "tax": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Tax charged to the buyer."
+          },
+          "applied_discount": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/FixedPriceDiscount"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PercentageDiscount"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "fixed_price": "#/components/schemas/FixedPriceDiscount",
+                    "percentage": "#/components/schemas/PercentageDiscount"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Discount",
+            "description": "The discount from the seller's coupon; null when none applied or the coupon isn't the seller's."
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The total the buyer paid."
+          }
+        },
+        "type": "object",
+        "required": [
+          "subtotal",
+          "shipping",
+          "tax",
+          "applied_discount",
+          "total"
+        ],
+        "title": "OrderAmounts"
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "pending_fulfillment",
+          "completed",
+          "cancelled",
+          "failed"
+        ],
+        "title": "OrderStatus"
+      },
+      "OrderTransactionType": {
+        "type": "string",
+        "enum": [
+          "buy_it_now",
+          "auction",
+          "giveaway",
+          "other"
+        ],
+        "title": "OrderTransactionType"
+      },
+      "PercentageDiscount": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "percentage",
+            "title": "Type",
+            "description": "A percentage off the order."
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "The amount discounted."
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "amount"
+        ],
+        "title": "PercentageDiscount"
+      },
+      "Product": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "The product's id.",
+            "readOnly": true
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "The product's title."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "The product's description."
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id",
+            "description": "The seller-provided external identifier for the product."
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "The url of the product in the seller's inventory dashboard.",
+            "readOnly": true
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Category"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The product's category."
+          },
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/ProductAttribute"
+            },
+            "type": "array",
+            "title": "Attributes",
+            "description": "The product's attribute values."
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ProductOption"
+            },
+            "type": "array",
+            "title": "Options",
+            "description": "The product's option axes (e.g. Color, Size)."
+          },
+          "media": {
+            "items": {
+              "$ref": "#/components/schemas/Media"
+            },
+            "type": "array",
+            "title": "Media",
+            "description": "The product's images."
+          },
+          "dimension_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DimensionProfile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The product's dimension profile."
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "When the product was created.",
+            "readOnly": true
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At",
+            "description": "When the product was last updated.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "Product",
+        "description": "The full representation of a product, shared by the REST v2 `get_product`\nresponse and any full-body product webhooks.",
+        "example": {
+          "attributes": [
+            {
+              "id": "7",
+              "name": "Condition",
+              "value": "Near Mint"
+            }
+          ],
+          "category": {
+            "id": "42",
+            "name": "Trading Cards"
+          },
+          "created_at": "2026-01-15T12:00:00.000Z",
+          "description": "A very rare card.",
+          "dimension_profile": {
+            "active": true,
+            "dimensions": {
+              "height": 1,
+              "length": 6,
+              "unit": "inch",
+              "width": 4
+            },
+            "id": "88",
+            "name": "API 4 oz",
+            "ownership": "seller",
+            "weight": {
+              "unit": "ounce",
+              "value": 4
+            }
+          },
+          "external_id": "ext-123",
+          "id": "12345",
+          "media": [
+            {
+              "alt": "front",
+              "id": "555",
+              "url": "https://cdn.whatnot.com/i/555.jpg"
+            }
+          ],
+          "options": [
+            {
+              "id": "1001",
+              "name": "Color",
+              "values": [
+                "Red",
+                "Blue"
+              ]
+            }
+          ],
+          "title": "Rare Holographic Card",
+          "updated_at": "2026-01-15T12:00:00.000Z",
+          "url": "https://www.whatnot.com/product/abc123"
+        }
+      },
+      "ProductAttribute": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "title": "Id",
+            "description": "The product attribute's id."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The product attribute's display name, if the definition is known.",
+            "readOnly": true
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "The attribute's value for this product."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "value"
+        ],
+        "title": "ProductAttribute"
+      },
+      "ProductOption": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "The product option's id.",
+            "readOnly": true
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The option's display name, e.g. 'Color'."
+          },
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Values",
+            "description": "The option's values, e.g. ['Red', 'Blue']."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "values"
+        ],
+        "title": "ProductOption"
+      },
+      "Shipment": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The shipment's ID."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The url of the shipment in the seller's dashboard."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ShipmentStatus",
+            "description": "The current fulfillment status of this shipment."
+          },
+          "fulfillment_method": {
+            "$ref": "#/components/schemas/FulfillmentMethod",
+            "description": "The method of fulfillment for this shipment."
+          },
+          "recipient": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Whatnot user receiving this shipment; requires read:customers."
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Weight"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Package weight, if known and valid."
+          },
+          "dimensions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Dimensions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Package dimensions, if known and valid."
+          },
+          "signature_required": {
+            "type": "boolean",
+            "title": "Signature Required",
+            "description": "Whether delivery requires a signature."
+          },
+          "hazardous_material": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HazardousMaterial"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hazardous-material classification of this shipment's contents."
+          },
+          "tracking": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentTracking"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Carrier and tracking information."
+          },
+          "documents": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentDocuments"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The shipping documents available for this shipment; requires read:customers."
+          },
+          "insurance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentInsurance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shipping insurance, if present."
+          },
+          "seller_paid_shipping_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seller's share of shipping across this shipment's active orders, set at checkout by the seller's shipping settings. Not the label's purchase price, and excludes later carrier adjustments. Null when none was recorded."
+          },
+          "required_actions": {
+            "items": {
+              "$ref": "#/components/schemas/ShipmentRequiredAction"
+            },
+            "type": "array",
+            "title": "Required Actions",
+            "description": "Actions required before fulfillment."
+          },
+          "dropoff_due": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropoff Due",
+            "description": "Due date at seller-local midnight, serialized with timezone; not the overdue cutoff. Null for pickup, non-pre-transit shipments, or missing inputs."
+          },
+          "ship_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship After",
+            "description": "Earliest time to ship a shipment held for a weekly bundle or presale; null otherwise. Shipping earlier closes the bundle, so the buyer's later orders go into a new shipment."
+          },
+          "replacement_shipment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacement Shipment Id",
+            "description": "ID of the shipment that received this shipment's items when it was replaced, including when it was bundled into another shipment, or that items were split off to. The immediate successor, not the final one in a chain."
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "Creation timestamp, if recorded."
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At",
+            "description": "Last update timestamp, if recorded."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "status",
+          "fulfillment_method",
+          "recipient",
+          "weight",
+          "dimensions",
+          "signature_required",
+          "hazardous_material",
+          "tracking",
+          "documents",
+          "insurance",
+          "seller_paid_shipping_cost",
+          "required_actions",
+          "dropoff_due",
+          "ship_after",
+          "replacement_shipment_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Shipment",
+        "example": {
+          "created_at": "2026-09-21T12:00:00.000Z",
+          "dimensions": {
+            "height": 1,
+            "length": 6,
+            "unit": "inch",
+            "width": 4
+          },
+          "documents": {
+            "bundled_url": "https://example.com/documents.pdf",
+            "label_url": "https://example.com/label.pdf"
+          },
+          "dropoff_due": "2026-09-23T07:00:00.000Z",
+          "fulfillment_method": "shipping",
+          "hazardous_material": "not_hazardous",
+          "id": "12345",
+          "insurance": {
+            "amount": {
+              "amount": "25.00",
+              "currency": "USD"
+            },
+            "contents": "Trading cards"
+          },
+          "recipient": {
+            "display_name": "Card Collector",
+            "id": "6789",
+            "username": "cardcollector"
+          },
+          "required_actions": [],
+          "seller_paid_shipping_cost": {
+            "amount": "5.99",
+            "currency": "USD"
+          },
+          "ship_after": "2026-09-21T07:00:00.000Z",
+          "signature_required": false,
+          "status": "label_generated",
+          "tracking": {
+            "carrier": "usps",
+            "service": "usps_ground_advantage",
+            "tracking_code": "9400111899223100012345"
+          },
+          "updated_at": "2026-09-21T13:00:00.000Z",
+          "url": "https://www.whatnot.com/dashboard/shipments/U2hpcG1lbnROb2RlOjUxMjU0MTM5Mw==",
+          "weight": {
+            "unit": "ounce",
+            "value": 4
+          }
+        }
+      },
+      "ShipmentDocuments": {
+        "properties": {
+          "label_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Url",
+            "description": "Shipping label URL, if available. Usually hosted by the label provider, which sets how long it stays valid."
+          },
+          "bundled_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bundled Url",
+            "description": "Combined label and packing slip, or pickup slip URL. This presigned URL is valid for up to 1 hour; re-fetch the shipment with `GET /shipments/{shipment_id}` for a fresh link."
+          },
+          "commercial_invoice_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commercial Invoice Url",
+            "description": "Commercial invoice URL from the label provider, if one was issued."
+          }
+        },
+        "type": "object",
+        "required": [
+          "label_url",
+          "bundled_url",
+          "commercial_invoice_url"
+        ],
+        "title": "ShipmentDocuments"
+      },
+      "ShipmentInsurance": {
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Insured value."
+          },
+          "contents": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contents",
+            "description": "Description of insured contents."
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount",
+          "contents"
+        ],
+        "title": "ShipmentInsurance"
+      },
+      "ShipmentRequiredAction": {
+        "type": "string",
+        "enum": [
+          "country_of_origin_required",
+          "itn_required",
+          "order_pending_cancellation",
+          "package_review_required"
+        ],
+        "title": "ShipmentRequiredAction"
+      },
+      "ShipmentStatus": {
+        "type": "string",
+        "enum": [
+          "created",
+          "label_generated",
+          "dropped_off",
+          "in_transit",
+          "delivered",
+          "failed",
+          "cancelled",
+          "cancelled_not_shipped",
+          "cancelled_not_shipped_with_dropoff",
+          "cancelled_tracking_stuck"
+        ],
+        "title": "ShipmentStatus"
+      },
+      "ShipmentTracking": {
+        "properties": {
+          "carrier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier",
+            "description": "The carrier delivering this shipment."
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service",
+            "description": "The carrier service used for this shipment."
+          },
+          "tracking_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Code",
+            "description": "The carrier's tracking code for this shipment."
+          },
+          "last_mile_tracking_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Mile Tracking Code",
+            "description": "The tracking code used for the final leg of delivery."
+          }
+        },
+        "type": "object",
+        "required": [
+          "carrier",
+          "service",
+          "tracking_code",
+          "last_mile_tracking_code"
+        ],
+        "title": "ShipmentTracking"
+      },
+      "Show": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The show's ID."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "The show's title."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The url of the show in the seller's dashboard."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "The show's description, if set."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ShowStatus",
+            "description": "The show's lifecycle status. A stopped show can resume; an ended show cannot."
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/ShowVisibility",
+            "description": "Whether the show is visible to everyone or only to invited viewers."
+          },
+          "scheduled_start_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Start At",
+            "description": "When the show is scheduled to start. Not updated when the show goes live."
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At",
+            "description": "When the show ended, if it has."
+          },
+          "thumbnail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Media"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The show's thumbnail image, if set."
+          },
+          "created_at": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation timestamp."
+          },
+          "updated_at": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update timestamp."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "url",
+          "description",
+          "status",
+          "visibility",
+          "scheduled_start_at",
+          "ended_at",
+          "thumbnail",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "Show",
+        "example": {
+          "created_at": "2026-09-20T18:30:00.000Z",
+          "description": "Vintage and modern breaks, giveaways every 30 minutes.",
+          "id": "0b6f3c1e-8a52-4d2e-9f7a-3c5d1e2f4a6b",
+          "scheduled_start_at": "2026-09-27T01:00:00.000Z",
+          "status": "scheduled",
+          "thumbnail": {
+            "id": "12345",
+            "url": "https://images.whatnot.com/thumbnail.jpg"
+          },
+          "title": "Sunday Night Pokémon Breaks",
+          "updated_at": "2026-09-21T09:15:00.000Z",
+          "url": "https://www.whatnot.com/dashboard/lives/edit/0b6f3c1e-8a52-4d2e-9f7a-3c5d1e2f4a6b",
+          "visibility": "public"
+        }
+      },
+      "ShowStatus": {
+        "type": "string",
+        "enum": [
+          "scheduled",
+          "live",
+          "stopped",
+          "ended",
+          "cancelled"
+        ],
+        "title": "ShowStatus"
+      },
+      "ShowVisibility": {
+        "type": "string",
+        "enum": [
+          "public",
+          "private"
+        ],
+        "title": "ShowVisibility"
+      },
+      "UserSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The user's decimal ID."
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "The user's username."
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "The user's display name."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "UserSummary"
+      },
+      "Weight": {
+        "properties": {
+          "value": {
+            "type": "number",
+            "title": "Value",
+            "description": "The weight amount."
+          },
+          "unit": {
+            "$ref": "#/components/schemas/WeightUnit",
+            "description": "The weight unit."
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "unit"
+        ],
+        "title": "Weight"
+      },
+      "WeightUnit": {
+        "type": "string",
+        "enum": [
+          "ounce",
+          "pound",
+          "gram",
+          "kilogram"
+        ],
+        "title": "WeightUnit",
+        "description": "The unit used to express weight."
+      },
+      "OrderCreatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orders.created",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "orders.created"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Order",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "OrderCreatedWebhookBody"
+      },
+      "OrderUpdatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orders.updated",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "orders.updated"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Order",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "OrderUpdatedWebhookBody"
+      },
+      "ProductAddedToShowWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "merchandising.products.added_to_show",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "merchandising.products.added_to_show"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProductShowData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ProductAddedToShowWebhookBody"
+      },
+      "ProductCreatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "products.created",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "products.created"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ProductCreatedWebhookBody"
+      },
+      "ProductDeletedData": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The deleted product's ID."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ProductDeletedData"
+      },
+      "ProductDeletedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "products.deleted",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "products.deleted"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProductDeletedData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ProductDeletedWebhookBody"
+      },
+      "ProductRemovedFromShowWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "merchandising.products.removed_from_show",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "merchandising.products.removed_from_show"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProductShowData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ProductRemovedFromShowWebhookBody"
+      },
+      "ProductShowData": {
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "title": "Product Id",
+            "description": "The product's ID."
+          },
+          "show_id": {
+            "type": "string",
+            "title": "Show Id",
+            "description": "The show's ID."
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id",
+          "show_id"
+        ],
+        "title": "ProductShowData"
+      },
+      "ProductUpdatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "products.updated",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "products.updated"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ProductUpdatedWebhookBody"
+      },
+      "ShipmentCancelledWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.cancelled",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.cancelled"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Shipment",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentCancelledWebhookBody"
+      },
+      "ShipmentCreatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.created",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.created"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Shipment",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentCreatedWebhookBody"
+      },
+      "ShipmentItemsAddedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.items.added",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.items.added"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentItemsData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentItemsAddedWebhookBody"
+      },
+      "ShipmentItemsData": {
+        "properties": {
+          "shipment_id": {
+            "type": "string",
+            "title": "Shipment Id",
+            "description": "The shipment's ID."
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Weight"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Package weight, if known and valid."
+          },
+          "dimensions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Dimensions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Package dimensions, if known and valid."
+          },
+          "hazardous_material": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HazardousMaterial"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hazardous-material classification of the contents."
+          },
+          "signature_required": {
+            "type": "boolean",
+            "title": "Signature Required",
+            "description": "Whether delivery requires a signature."
+          },
+          "insurance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentInsurance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shipping insurance, if present."
+          },
+          "shipment_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Shipment Item Ids",
+            "description": "Every item on the shipment after the change, including the items that were already on it, not only the items that were added or removed."
+          },
+          "ship_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ship After",
+            "description": "The shipment's earliest time to ship, as on the shipment. Set when it is held for a weekly bundle or presale; null otherwise."
+          }
+        },
+        "type": "object",
+        "required": [
+          "shipment_id",
+          "weight",
+          "dimensions",
+          "hazardous_material",
+          "signature_required",
+          "insurance",
+          "shipment_item_ids",
+          "ship_after"
+        ],
+        "title": "ShipmentItemsData"
+      },
+      "ShipmentItemsRemovedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.items.removed",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.items.removed"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentItemsData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentItemsRemovedWebhookBody"
+      },
+      "ShipmentLabelData": {
+        "properties": {
+          "shipment_id": {
+            "type": "string",
+            "title": "Shipment Id",
+            "description": "The shipment's ID."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "generated",
+              "regenerated"
+            ],
+            "title": "Reason",
+            "description": "Whether this is the shipment's first label or a replacement."
+          },
+          "tracking": {
+            "$ref": "#/components/schemas/ShipmentTracking",
+            "description": "Carrier and tracking information for the label."
+          },
+          "documents": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentDocuments"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The shipping documents; requires read:customers."
+          }
+        },
+        "type": "object",
+        "required": [
+          "shipment_id",
+          "reason",
+          "tracking",
+          "documents"
+        ],
+        "title": "ShipmentLabelData"
+      },
+      "ShipmentLabelGeneratedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.label_generated",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.label_generated"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentLabelData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentLabelGeneratedWebhookBody"
+      },
+      "ShipmentParcelData": {
+        "properties": {
+          "shipment_id": {
+            "type": "string",
+            "title": "Shipment Id",
+            "description": "The shipment's ID."
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Weight"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Package weight, if known and valid."
+          },
+          "dimensions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Dimensions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Package dimensions, if known and valid."
+          },
+          "hazardous_material": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HazardousMaterial"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hazardous-material classification of the contents."
+          },
+          "signature_required": {
+            "type": "boolean",
+            "title": "Signature Required",
+            "description": "Whether delivery requires a signature."
+          },
+          "insurance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentInsurance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shipping insurance, if present."
+          }
+        },
+        "type": "object",
+        "required": [
+          "shipment_id",
+          "weight",
+          "dimensions",
+          "hazardous_material",
+          "signature_required",
+          "insurance"
+        ],
+        "title": "ShipmentParcelData"
+      },
+      "ShipmentParcelUpdatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.parcel_updated",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.parcel_updated"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentParcelData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentParcelUpdatedWebhookBody"
+      },
+      "ShipmentReplacedData": {
+        "properties": {
+          "previous_shipment": {
+            "$ref": "#/components/schemas/Shipment",
+            "description": "The shipment that was replaced. It no longer has any items, and its replacement_shipment_id is the replacement shipment's ID. It is usually cancelled, but keeps its previous status when Whatnot support creates the new label."
+          },
+          "replacement_shipment": {
+            "$ref": "#/components/schemas/Shipment",
+            "description": "The shipment that now holds the previous shipment's items. Usually this is a newly created shipment. If the previous shipment was bundled into an existing one, it is that existing shipment, which also retains its own items."
+          }
+        },
+        "type": "object",
+        "required": [
+          "previous_shipment",
+          "replacement_shipment"
+        ],
+        "title": "ShipmentReplacedData"
+      },
+      "ShipmentReplacedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.replaced",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.replaced"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentReplacedData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentReplacedWebhookBody"
+      },
+      "ShipmentTrackingCodeAddedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shipments.tracking_code_added",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shipments.tracking_code_added"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShipmentTrackingData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShipmentTrackingCodeAddedWebhookBody"
+      },
+      "ShipmentTrackingData": {
+        "properties": {
+          "shipment_id": {
+            "type": "string",
+            "title": "Shipment Id",
+            "description": "The shipment's ID."
+          },
+          "tracking": {
+            "$ref": "#/components/schemas/ShipmentTracking",
+            "description": "Carrier and tracking information."
+          }
+        },
+        "type": "object",
+        "required": [
+          "shipment_id",
+          "tracking"
+        ],
+        "title": "ShipmentTrackingData"
+      },
+      "ShowCancelledWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shows.cancelled",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shows.cancelled"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShowStatusChangeData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShowCancelledWebhookBody"
+      },
+      "ShowCreatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shows.created",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shows.created"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Show",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShowCreatedWebhookBody"
+      },
+      "ShowEndedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shows.ended",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shows.ended"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShowStatusChangeData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShowEndedWebhookBody"
+      },
+      "ShowStartedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shows.started",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shows.started"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/ShowStatusChangeData",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShowStartedWebhookBody"
+      },
+      "ShowStatusChangeData": {
+        "properties": {
+          "show_id": {
+            "type": "string",
+            "title": "Show Id",
+            "description": "The show's ID."
+          }
+        },
+        "type": "object",
+        "required": [
+          "show_id"
+        ],
+        "title": "ShowStatusChangeData"
+      },
+      "ShowUpdatedWebhookBody": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "shows.updated",
+            "title": "Type",
+            "description": "The webhook topic.",
+            "default": "shows.updated"
+          },
+          "timestamp": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "When the event happened, in ISO 8601. Stable across retries; the `webhook-timestamp` header is when each attempt was sent.",
+            "examples": [
+              "2026-10-20T16:00:00.123Z"
+            ]
+          },
+          "data": {
+            "$ref": "#/components/schemas/Show",
+            "description": "The event's data. Its shape depends on the topic."
+          },
+          "version": {
+            "type": "string",
+            "const": "v2",
+            "title": "Version",
+            "description": "The payload version.",
+            "default": "v2"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id",
+            "description": "The ID of the seller the event belongs to.",
+            "examples": [
+              "1234567"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "timestamp",
+          "data",
+          "version",
+          "seller_id"
+        ],
+        "title": "ShowUpdatedWebhookBody"
+      }
+    }
+  },
+  "x-ext-urls": {}
+}

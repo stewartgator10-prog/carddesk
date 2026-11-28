@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   pickTemplateListings, pickPolicies, templateFromItem, conditionValuesFromPolicy, learnTemplates, buildItemXml, buildSpecifics,
   bestOfferPrices, shippingProfileFor, pictureUploadBody, uploadPicture, checkSnapItem, publishSnapItem, listingSignature, parseXml,
-  FALLBACK_CONDITION_VALUES, listingUuid,
+  FALLBACK_CONDITION_VALUES, listingUuid, endFixedPriceItem,
 } from '../netlify/lib/ebay-listing.js';
 import { fakeDb } from './fake-db.js';
 import { listingPhotoPaths, MAX_LISTING_PHOTOS } from '../netlify/lib/snap-logic.js';
@@ -223,6 +223,11 @@ test('publish: only after a passing check of the same listing; then stock + list
   assert.equal(inv.purchase_id, 'p1');
   assert.equal(inv.status, 'In Stock');
   assert.equal(db.tables.ebay_listings[0].status, 'Active');
+  assert.match(sent[0][1], /<Quantity>1<\/Quantity>/);
+  // Where the card is listed, for cross-listing.
+  const ml = db.tables.marketplace_listings;
+  assert.equal(ml.length, 1);
+  assert.deepEqual([ml[0].marketplace, ml[0].external_id, ml[0].snap_item_id, ml[0].inventory_id, ml[0].status, ml[0].quantity], ['ebay', '407999000111', item().id, inv.id, 'active', 1]);
 
   // A second publish of the same card is refused before eBay is called.
   await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: item(), settings: { snapPromotePct: 0 }, call: async () => { throw new Error('no'); } }), /Only approved cards/);
@@ -345,4 +350,56 @@ test('Promoted Listings: new listings join one 2% campaign, created on first use
   } });
   assert.deepEqual([r2.ok, seen], [true, ['/ad_campaign/OLD/ad', '/ad_campaign', '/ad_campaign/NEW/ad']]);
   assert.equal(db2.tables.ebay_accounts[0].promo_campaign_id, 'NEW');
+});
+
+test('the card\'s quantity goes on the eBay listing; quantity 1 keeps the check of cards checked before quantity existed', () => {
+  const tpl = { pokemon: { categoryId: '183454', itemSpecifics: [] }, policies: {}, conditions: { values: FALLBACK_CONDITION_VALUES } };
+  const base = { id: 'x', title: 'T', price: 5, game: 'pokemon', condition: 'NM' };
+  assert.match(buildItemXml({ item: { ...base, quantity: 3 }, templates: tpl, pictureUrls: [] }), /<Quantity>3<\/Quantity>/);
+  assert.match(buildItemXml({ item: base, templates: tpl, pictureUrls: [] }), /<Quantity>1<\/Quantity>/);
+  assert.equal(listingSignature({ ...base, quantity: 1 }), listingSignature(base));
+  assert.notEqual(listingSignature({ ...base, quantity: 2 }), listingSignature(base));
+});
+
+test('ending an eBay listing: EndFixedPriceItem, and "already ended" counts as done', async () => {
+  const sent = [];
+  const r = await endFixedPriceItem('t', '4071', async (_t, name, body) => { sent.push([name, body]); return '<EndFixedPriceItemResponse><Ack>Success</Ack><EndTime>2026-11-28T15:00:00.000Z</EndTime></EndFixedPriceItemResponse>'; });
+  assert.deepEqual(r, { ok: true, endedAt: '2026-11-28T15:00:00.000Z' });
+  assert.equal(sent[0][0], 'EndFixedPriceItem');
+  assert.match(sent[0][1], /<ItemID>4071<\/ItemID><EndingReason>NotAvailable<\/EndingReason>/);
+  const gone = await endFixedPriceItem('t', '4071', async () => '<EndFixedPriceItemResponse><Ack>Failure</Ack><Errors><LongMessage>The auction has already been closed.</LongMessage><ErrorCode>1047</ErrorCode><SeverityCode>Error</SeverityCode></Errors></EndFixedPriceItemResponse>');
+  assert.deepEqual(gone, { ok: true, gone: true });
+  await assert.rejects(endFixedPriceItem('t', '4071', async () => '<EndFixedPriceItemResponse><Ack>Failure</Ack><Errors><LongMessage>Internal error.</LongMessage><SeverityCode>Error</SeverityCode></Errors></EndFixedPriceItemResponse>'), /Internal error/);
+});
+
+const addOk = '<AddFixedPriceItemResponse><Ack>Success</Ack><ItemID>407999000222</ItemID><Fees><Fee><Name>ListingFee</Name><Fee>0.0</Fee></Fee></Fees></AddFixedPriceItemResponse>';
+
+test('a card that sold out on another marketplace is never published to eBay again, even with a passing check', async () => {
+  for (const over of [{ quantity: 0 }, { quantity: 1, sold_out_at: '2026-11-28T15:00:00.000Z' }]) {
+    const db = publishDb(card());
+    await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl: uploadOk, call: async () => verifyOk });
+    Object.assign(db.tables.snap_items[0], over);   // sold on Whatnot after the eBay check
+    await assert.rejects(publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: { snapPromotePct: 0 }, call: async () => { throw new Error('eBay was called'); } }),
+      (e) => e.status === 409 && /sold out/.test(e.message));
+    assert.equal(db.tables.snap_items[0].publish_state, 'checked');
+    assert.equal(db.tables.inventory.length, 0);
+  }
+});
+
+test('the listing is live on eBay: a failed marketplace_listings write is logged, not reported as a failed publish', async () => {
+  const db = fakeDb({
+    snap_items: [card()], inventory: [], ebay_listings: [], settings: [],
+    ebay_accounts: [{ id: 'acct', user_id: U, listing_templates: templates }],
+  }, null, { files: { 'u1/b/front.jpg': 'front', 'u1/b/back.jpg': 'back' },
+    failOn: ({ table, op }) => (table === 'marketplace_listings' && op !== 'select' ? 'relation "public.marketplace_listings" does not exist' : null) });
+  await checkSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: {}, fetchImpl: uploadOk, call: async () => verifyOk });
+  const warn = console.warn; const logged = [];
+  console.warn = (m) => logged.push(m);
+  try {
+    const r = await publishSnapItem({ db, userId: U, token: 't', item: db.tables.snap_items[0], settings: { snapPromotePct: 0 }, call: async () => addOk });
+    assert.equal(r.itemId, '407999000222');
+  } finally { console.warn = warn; }
+  assert.equal(db.tables.snap_items[0].status, 'listed');
+  assert.equal(db.tables.inventory.length, 1);
+  assert.match(logged.join(' '), /marketplace_listings write for eBay item 407999000222 failed/);
 });

@@ -92,12 +92,13 @@ const log = [], errors = [], calls = [];
 
   // Listed card: update photos on eBay through the in-page confirm
   await page.getByRole('button', { name: /^On eBay/ }).click();
-  await page.getByRole('button', { name: 'Update photos on eBay' }).click();
+  log.push('live banner: ' + (await page.getByText(/^Not on eBay yet: photos/).innerText()));
+  await page.getByRole('button', { name: 'Update on eBay' }).click();
   const ad = page.getByRole('alertdialog');
   log.push('confirm: ' + (await ad.innerText()).replace(/\s+/g, ' ').slice(0, 160));
-  await ad.getByRole('button', { name: 'Update photos on eBay' }).click();
-  await page.getByText(/Photos updated on eBay listing #4071/).waitFor();
-  log.push('banner gone: ' + ((await page.getByText("These photos aren't on eBay yet").count()) === 0));
+  await ad.getByRole('button', { name: 'Update on eBay' }).click();
+  await page.getByText(/eBay listing #4071 updated: photos/).waitFor();
+  log.push('banner gone: ' + ((await page.getByText(/^Not on eBay yet: photos/).count()) === 0));
   log.push('calls: ' + calls.join(' ; '));
   log.push('overflow px: ' + await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth));
   await browser.close(); srv.close();

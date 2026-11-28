@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ExternalLink, Link2, Loader, Unlink, Store } from 'lucide-react';
 import { supabase } from './lib/supabase.js';
 import { askConfirm } from './lib/dialog.jsx';
+import MarketplacesPanel, { MarketplaceStrip } from './MarketplacesPanel.jsx';
 
 const fmt = (n, cur = 'USD') =>
   n === null || n === undefined ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: cur || 'USD' }).format(n);
@@ -31,7 +32,7 @@ async function api(method, body) {
   return out;
 }
 
-export default function ListingsTab() {
+export default function ListingsTab({ plan = null }) {
   const [account, setAccount] = useState(null);
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -123,6 +124,7 @@ export default function ListingsTab() {
     <div>
       {notice && <div className="bg-card" style={{ padding: '12px 16px', marginBottom: 16, borderColor: 'var(--good)' }}><span className="accent-green">{notice}</span></div>}
       {error && <div className="bg-card" style={{ padding: '12px 16px', marginBottom: 16, borderColor: 'var(--accent)' }}><span className="accent-red">{error}</span></div>}
+      <MarketplaceStrip ebay={account ? (account.ebay_username ? `@${account.ebay_username}` : 'Connected') : null} />
 
       {!account ? (
         <section className="bg-card" style={{ padding: 32, textAlign: 'center' }}>
@@ -198,6 +200,7 @@ export default function ListingsTab() {
           </div>
         </>
       )}
+      <MarketplacesPanel plan={plan} />
     </div>
   );
 }

@@ -56,6 +56,21 @@ export function parseReviseResponse(xml, changes) {
   });
 }
 
+// ---------- quantity ----------
+// The number of cards available on a live fixed-price listing.
+export function buildReviseQuantityXml({ itemId, sku, quantity }) {
+  return `<?xml version="1.0" encoding="utf-8"?><ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ErrorLanguage>en_US</ErrorLanguage><WarningLevel>High</WarningLevel><InventoryStatus><ItemID>${esc(itemId)}</ItemID>${sku ? `<SKU>${esc(sku)}</SKU>` : ''}<Quantity>${Math.max(0, Math.floor(Number(quantity) || 0))}</Quantity></InventoryStatus></ReviseInventoryStatusRequest>`;
+}
+
+export async function reviseQuantity(token, { itemId, sku = null, quantity }, call = tradingCall) {
+  const xml = await call(token, 'ReviseInventoryStatus', buildReviseQuantityXml({ itemId, sku, quantity }));
+  if (!['Success', 'Warning'].includes(tag(xml, 'Ack'))) {
+    const msg = [...new Set(tags(xml, 'Errors').filter((e) => tag(e, 'SeverityCode') === 'Error').map((e) => tag(e, 'LongMessage') || tag(e, 'ShortMessage')))].filter(Boolean).join(' | ');
+    throw new Error(msg || `eBay returned ${tag(xml, 'Ack') || 'Failure'}`);
+  }
+  return { itemId: String(itemId), quantity: Math.max(0, Math.floor(Number(quantity) || 0)) };
+}
+
 export async function tradingCall(token, callName, xmlBody) {
   const res = await fetch(TRADING_URL, {
     method: 'POST',

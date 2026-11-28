@@ -35,6 +35,8 @@ const isEnglish = (lang) => /^english$/i.test(lang || 'English');
 // A listing's photos in eBay order: the main (identified) photo first, then the extras.
 // eBay's own limit. Listings brought in from eBay can already have this many.
 export const MAX_LISTING_PHOTOS = 24;
+// A card with no stock left (sold on any marketplace). Cards from before quantity existed have none set.
+export const isSoldOut = (item) => (item?.quantity != null && Number(item.quantity) < 1) || !!item?.sold_out_at;
 export function listingPhotoPaths(item) {
   const extras = Array.isArray(item?.extra_photo_paths) && item.extra_photo_paths.length
     ? item.extra_photo_paths
@@ -212,8 +214,9 @@ export function summarizeTrial(rows) {
 // ---------- cards that are live on eBay ----------
 // What a live card has that eBay doesn't show yet. ebay_live holds the title and description eBay
 // has; photos are out of date when eBay's copies were cleared by a photo change.
+// A sold-out card has nothing live on eBay to change, so it has none.
 export function liveChanges(item) {
-  if (item?.status !== 'listed') return [];
+  if (item?.status !== 'listed' || isSoldOut(item)) return [];
   const live = item.ebay_live || {};
   const same = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
   const out = [];

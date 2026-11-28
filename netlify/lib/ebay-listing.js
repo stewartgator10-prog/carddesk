@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { tradingCall } from './trading-price.js';
-import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths, LISTABLE_GAMES, GAME_LABELS } from './snap-logic.js';
+import { titleNumber, MAX_LISTING_PHOTOS, listingPhotoPaths, LISTABLE_GAMES, GAME_LABELS, isSoldOut } from './snap-logic.js';
 import { buildDescription } from './listing-copy.js';
 import { getAppToken } from './ebay-browse.js';
 import { offerThresholds } from './trading-price.js';
@@ -220,6 +220,9 @@ export function shippingProfileFor(price, templates, settings = {}) {
   return (price < cutoff ? p.envelope : p.parcel) || p.envelope || p.parcel || null;
 }
 
+// How many of this card the listing offers (snap_items.quantity, at least 1).
+export const listingQuantity = (item) => Math.max(1, Math.floor(Number(item.quantity) || 1));
+
 export const listingUuid = (snapId) => String(snapId).replace(/-/g, '').toUpperCase().slice(0, 32);
 export const snapSku = (snapId) => `SNAP-${String(snapId).replace(/-/g, '').slice(0, 10).toUpperCase()}`;
 
@@ -227,7 +230,8 @@ export const snapSku = (snapId) => `SNAP-${String(snapId).replace(/-/g, '').slic
 export function listingSignature(item) {
   return crypto.createHash('sha256').update(JSON.stringify([item.title, Number(item.price), item.condition, item.finish, item.card_name,
     item.catalog_set || item.set_name, item.catalog_number || item.collector_number, item.misprint_confirmed, item.ebay_picture_urls || [],
-    item.game || null, item.rarity || null, item.extraction?.game_name || null, item.description || null])).digest('hex').slice(0, 16);
+    item.game || null, item.rarity || null, item.extraction?.game_name || null, item.description || null,
+    ...(listingQuantity(item) !== 1 ? [listingQuantity(item)] : [])])).digest('hex').slice(0, 16);
 }
 
 // The shipping package: calculated shipping needs its weight and size. The seller's numbers from
@@ -270,7 +274,7 @@ export function buildItemXml({ item, templates, settings = {}, pictureUrls }) {
     tpl.location ? `<Location>${esc(tpl.location)}</Location>` : '',
     tpl.postalCode ? `<PostalCode>${esc(tpl.postalCode)}</PostalCode>` : '',
     tpl.dispatchTimeMax ? `<DispatchTimeMax>${esc(tpl.dispatchTimeMax)}</DispatchTimeMax>` : '',
-    '<ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>1</Quantity>',
+    `<ListingDuration>GTC</ListingDuration><ListingType>FixedPriceItem</ListingType><Quantity>${listingQuantity(item)}</Quantity>`,
     `<SKU>${esc(item.sku || snapSku(item.id))}</SKU>`,
     `<UUID>${listingUuid(item.id)}</UUID>`,
     packageXml(settings),
@@ -417,6 +421,17 @@ export async function uploadListingPhotos({ db, token, item, paths, fetchImpl = 
   return urls;
 }
 
+// ---------- ending a listing ----------
+// EndFixedPriceItem takes a live Buy It Now listing down. "Already ended" counts as done.
+const ALREADY_ENDED = /already (been )?(closed|ended)|has ended|is not active|\(1047\)|\(17\)/i;
+export async function endFixedPriceItem(token, itemId, call = tradingCall) {
+  const xml = await call(token, 'EndFixedPriceItem', wrap('EndFixedPriceItem', `<ItemID>${esc(itemId)}</ItemID><EndingReason>NotAvailable</EndingReason>`));
+  const { r, errors } = responseOf(xml, 'EndFixedPriceItem');
+  if (!errors.length) return { ok: true, endedAt: text(r.EndTime) || new Date().toISOString() };
+  if (errors.every((e) => ALREADY_ENDED.test(e))) return { ok: true, gone: true };
+  throw new Error(errors.join('; '));
+}
+
 // ---------- check and publish ----------
 async function must(p) { const { data, error } = await p; if (error) throw new Error(error.message); return data; }
 
@@ -468,6 +483,8 @@ export async function checkSnapItem({ db, userId, token, item, settings, call = 
 
 export async function publishSnapItem({ db, userId, token, item, settings, call = tradingCall, promoteFetch = fetch }) {
   if (item.status !== 'approved') throw Object.assign(new Error('Only approved cards can be published.'), { status: 409 });
+  // A card that sold out on another marketplace stays approved; listing it again would sell it twice.
+  if (isSoldOut(item)) throw Object.assign(new Error('This card has sold out. Set its quantity above 0 before listing it again.'), { status: 409 });
   const check = item.publish_check;
   if (item.publish_state !== 'checked' || !check?.ok) throw Object.assign(new Error('Run the eBay check on this card first.'), { status: 409 });
   if (check.signature !== listingSignature(item)) throw Object.assign(new Error('The card changed after it was checked. Check it again before publishing.'), { status: 409 });
@@ -504,9 +521,20 @@ export async function publishSnapItem({ db, userId, token, item, settings, call 
   }));
   await must(db.from('ebay_listings').upsert({
     account_id: accountId, user_id: userId, item_id: itemId, title: item.title, sku: item.sku, price: Number(item.price), currency: 'USD',
-    quantity: 1, quantity_available: 1, quantity_sold: 0, listing_type: 'FixedPriceItem', start_time: now, view_url: url,
+    quantity: listingQuantity(item), quantity_available: listingQuantity(item), quantity_sold: 0, listing_type: 'FixedPriceItem', start_time: now, view_url: url,
     image_url: (item.ebay_picture_urls || [])[0] || null, status: 'Active', synced_at: now, best_offer: settings?.snapBestOffer !== false,
   }, { onConflict: 'account_id,item_id' }));
+  // Where the card is listed, for cross-listing and "sell once" (netlify/lib/sell-once.js).
+  // The card is already live on eBay, so a problem here is logged and never reported as a failed
+  // publish; ensureEbayRow (marketplaces/service.js) writes the row later when it's needed.
+  try {
+    const inv = await must(db.from('inventory').select('id').eq('user_id', userId).eq('ebay_item_id', itemId));
+    await must(db.from('marketplace_listings').upsert({
+      user_id: userId, snap_item_id: item.id, inventory_id: inv?.[0]?.id || null, marketplace: 'ebay', external_id: itemId, url,
+      price: Number(item.price), currency: 'USD', quantity: listingQuantity(item), status: 'active', ended_reason: null, last_error: null,
+      listed_at: now, synced_at: now, updated_at: now,
+    }, { onConflict: 'user_id,marketplace,external_id' }));
+  } catch (e) { console.warn(`marketplace_listings write for eBay item ${itemId} failed: ${e.message}`); }
   // Promoted Listings at the seller's rate. A problem here never undoes the listing; the card says why.
   const promo = await promoteListing({ db, userId, token, itemId, settings, fetchImpl: promoteFetch });
   if (!promo.skipped) await db.from('snap_items').update(promo.ok ? { promoted_at: new Date().toISOString(), promo_error: null } : { promo_error: promo.error }).eq('id', item.id).eq('user_id', userId);

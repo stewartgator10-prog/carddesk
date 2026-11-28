@@ -6,7 +6,7 @@
 //  - setSaleCost / estimateSales: costs for sales that happened before inventory existed
 // After any change, P&L is recomputed for the sales those cards are linked to.
 import crypto from 'node:crypto';
-import { recompute } from '../functions/ebay-sync-orders.js';
+import { recompute } from './ebay-orders.js';
 import { splitCost, estimateCost, validCost } from './cost-split.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
